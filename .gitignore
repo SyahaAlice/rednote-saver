@@ -5,3 +5,5 @@ xcuserdata/
 .DS_Store
 __pycache__/
 dist/
+Python.xcframework/
+app_packages/

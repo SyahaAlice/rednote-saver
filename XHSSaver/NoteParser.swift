@@ -11,8 +11,10 @@ struct XHSError: LocalizedError {
 struct NoteMedia {
     enum Kind { case image, live, video }
     var kind: Kind
-    /// 图片或视频的下载地址，按优先级排列（原图/原片在前，网页版在后）
-    var urls: [URL]
+    /// 原图 / 原片地址
+    var original: [URL]
+    /// 原图 / 原片失败时的替代地址（网页压缩版），使用前要先征得用户同意
+    var fallback: [URL]
     /// 实况图的动态视频地址（只有 kind == .live 时有）
     var liveVideoURLs: [URL] = []
 }
@@ -96,10 +98,18 @@ enum NoteParser {
 
     // MARK: - 解析网页
 
-    static func parse(text: String) async throws -> ParsedNote {
-        guard let url = extractURL(text) else { throw XHSError("没找到链接") }
+    static func isXHS(_ url: URL) -> Bool {
+        CookiePool.site(of: url.host ?? "") == "xiaohongshu.com"
+    }
+
+    /// cookieFile 为 nil 表示游客
+    static func parse(url: URL, cookieFile: URL?) async throws -> ParsedNote {
         let ref = try await resolve(url)
-        let session = URLSession(configuration: .ephemeral)
+        let config = URLSessionConfiguration.ephemeral
+        if let cookieFile, let jar = config.httpCookieStorage {
+            for c in CookiePool.httpCookies(from: cookieFile) { jar.setCookie(c) }
+        }
+        let session = URLSession(configuration: config)
         defer { session.finishTasksAndInvalidate() }
         var req = URLRequest(url: pageURL(id: ref.id, token: ref.token), timeoutInterval: 20)
         for (k, v) in pageHeaders { req.setValue(v, forHTTPHeaderField: k) }
@@ -142,34 +152,36 @@ enum NoteParser {
 
         if type == "video" {
             let video = note["video"] as? [String: Any] ?? [:]
-            var urls: [URL] = []
+            var original: [URL] = []
             if let key = (video["consumer"] as? [String: Any])?["originVideoKey"] as? String, !key.isEmpty,
                let u = URL(string: origVideoBase + key) {
-                urls.append(u)  // 原片（游客能拿到的 H.264 原视频）
+                original.append(u)  // 原片（游客能拿到的 H.264 原视频）
             }
             let streams = ((video["media"] as? [String: Any])?["stream"] as? [String: Any]) ?? [:]
             let all = streams.values.compactMap { $0 as? [[String: Any]] }.flatMap { $0 }
             let h264 = all.filter { ($0["videoCodec"] as? String ?? "").hasPrefix("h264") }
+            var fallback: [URL] = []
             for s in (h264.isEmpty ? all : h264) {
-                if let u = https(s["masterUrl"] as? String) { urls.append(u) }
+                if let u = https(s["masterUrl"] as? String) { fallback.append(u) }
+                for b in s["backupUrls"] as? [String] ?? [] { if let u = https(b) { fallback.append(u) } }
             }
-            if urls.isEmpty { throw XHSError("没找到视频地址") }
-            items.append(NoteMedia(kind: .video, urls: urls))
+            if original.isEmpty && fallback.isEmpty { throw XHSError("没找到视频地址") }
+            items.append(NoteMedia(kind: .video, original: original, fallback: fallback))
         } else {
             for img in note["imageList"] as? [[String: Any]] ?? [] {
-                var urls: [URL] = []
+                var original: [URL] = []
                 if let fid = img["fileId"] as? String, !fid.isEmpty, let u = URL(string: origImageBase + fid) {
-                    urls.append(u)  // 原图（通常是 HEIC）
+                    original.append(u)  // 原图（通常是 HEIC）
                 }
-                if let u = https(img["urlDefault"] as? String) { urls.append(u) }
-                var item = NoteMedia(kind: .image, urls: urls)
+                let fallback = [https(img["urlDefault"] as? String)].compactMap { $0 }
+                var item = NoteMedia(kind: .image, original: original, fallback: fallback)
                 if img["livePhoto"] as? Bool == true,
                    let h = ((img["stream"] as? [String: Any])?["h264"] as? [[String: Any]])?.first,
                    let master = https(h["masterUrl"] as? String) {
                     item.kind = .live
                     item.liveVideoURLs = [master] + (h["backupUrls"] as? [String] ?? []).compactMap { https($0) }
                 }
-                if !urls.isEmpty { items.append(item) }
+                if !(original.isEmpty && fallback.isEmpty) { items.append(item) }
             }
             if items.isEmpty { throw XHSError("这篇笔记里没找到图片") }
         }

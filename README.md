@@ -1,15 +1,33 @@
 # 小红书保存（XHSSaver）
 
-一个完全由你自己掌控的 iOS App：把小红书笔记里的**原图、原视频和实况图**存进相册，实况图存成**真正可以长按播放的实况照片**。
+一个完全由你自己掌控的 iOS App，替代已失效的「小红书助手pro」和 HyperTaps：
 
-- 只用 Apple 系统框架（URLSession、AVFoundation、PhotoKit、App Intents），没有第三方库，也不连接任何第三方服务器。
-- 以游客身份请求笔记页，和 `phone/dl.py` 的做法一致。
-- 实况照片在手机本地合成：先给图片写入 Apple MakerNote 配对 ID，再给视频写入 QuickTime content identifier 和 still-image-time 元数据轨道，最后用 PhotoKit 把两者作为同一个项目导入相册。
+- **下载**：小红书笔记的原图、原视频，实况图自动存成**真正可以长按播放的实况照片**；其它网站（B 站、抖音、微博、X、Instagram、YouTube 等）用内置的 **yt-dlp** 下载。
+- **实况工具**：视频转实况（截取最长 5 秒、可选封面帧）、实况拆分（拆成照片 + 视频）。
+- **号池**：电脑上整理好的 cookies 文件放进 App 的 `cookies` 文件夹即可使用，换 cookie 不用重新安装。
+- **原图优先**：原图 / 原片拿不到时会先问你，同意后才改存网页压缩版。
+
+实况照片在手机本地合成：图片写入 Apple MakerNote 配对 ID，视频写入 QuickTime content identifier 和 still-image-time 元数据轨道，再用 PhotoKit 作为同一个项目导入相册。不依赖任何第三方合成模块或服务器。
 
 ## 目录
 
 | 路径 | 内容 |
 |---|---|
+| `XHSSaver/NoteParser.swift` | 小红书：跟随短链、请求笔记页、解析 `__INITIAL_STATE__` |
+| `XHSSaver/CookiePool.swift` | 号池：读取 Netscape cookies、按网站挑账号轮换（与 `dl.py` 规则相同） |
+| `XHSSaver/YtDlp.swift`、`app/dlcore.py` | 内嵌 Python 3.13 上的 yt-dlp |
+| `XHSSaver/PythonBridge.m` | Swift ↔ Python 的桥接（Python 官方嵌入接口） |
+| `XHSSaver/LivePhotoMaker.swift` | 写入实况配对标记（不重新编码视频） |
+| `XHSSaver/LiveTools.swift` | 视频转实况、实况拆分、音视频合并（代替 ffmpeg） |
+| `XHSSaver/SaveService.swift` | 保存流程、替代版本确认、进度显示 |
+| `XHSSaver/SaveNoteIntent.swift` | 快捷指令操作「保存小红书笔记」 |
+| `tools/gen_project.py` | 生成 Xcode 工程文件（增删源文件后运行一次） |
+| `tools/parse_proto.py` | 小红书解析逻辑的 Python 原型，可离线检查已保存的网页 |
+| `.github/workflows/build.yml` | 在 GitHub 的 macOS 机器上编译未签名 .ipa |
+
+编译时 CI 会下载固定版本的 Python iOS 支持包（BeeWare 打包的 CPython 3.13，校验 SHA-256），并用 pip 装入 yt-dlp 和 certifi。安装包因此约几十 MB。
+
+---|---|
 | `XHSSaver/NoteParser.swift` | 跟随短链、请求笔记页、解析 `__INITIAL_STATE__` |
 | `XHSSaver/Downloader.swift` | 下载，按顺序尝试原图/原片和备用地址 |
 | `XHSSaver/LivePhotoMaker.swift` | 写入实况配对标记（不重新编码视频） |
@@ -62,6 +80,11 @@ iOS App 只能在 macOS 上编译，所以借用 GitHub 提供的 macOS 机器�
    - **手机上装**：把 `XHSSaver.ipa` 存到手机「文件」App 里，打开 AltStore → **My Apps** → 左上角 **+** → 选择这个 ipa。
 10. 第一次打开 App、点保存时，会询问「添加照片」权限，选**允许**。
 
+> **安装报错怎么办**
+> - `The app could not be found`：ipa 所在路径里有中文。把 ipa 放到纯英文路径（例如 `D:\Apple\XHSSaver.ipa`）再选。
+> - `The name for this app is invalid`：旧版本的问题（App 名称是中文），用最新的 ipa 即可。
+> - `WinHttpReceiveResponse: 12030`：连接 Apple 服务器时网络中断，重试一次。
+
 > 免费账号最多同时装 3 个侧载 App，AltStore 自己占 1 个。
 
 ## 三、每周自动续签
@@ -89,19 +112,49 @@ iOS App 只能在 macOS 上编译，所以借用 GitHub 提供的 macOS 机器�
 
 ## 四、使用
 
-- **App 里**：复制小红书分享文案或链接 → 打开「小红书保存」→ 点 **粘贴** → **保存到相册**。
+### 下载
+
+- **App 里**：复制分享文案或链接 → 打开「小红书保存」→ **粘贴** → **保存到相册**。
 - **分享菜单一键保存**：
   1. 打开「快捷指令」，新建一个快捷指令。
   2. 点底部 **ⓘ（简介）**，打开 **在共享表单中显示**，接收类型勾选 **URL** 和 **文本**。
-  3. 添加操作 **保存小红书笔记**（来自「小红书保存」），把参数设成「快捷指令输入」。
-  4. 在小红书里点分享 → 复制链接 → 也可以在其他 App 的分享菜单里直接选这个快捷指令。
-- 保存时 App 会被打开到前台，进度会显示在页面上。
+  3. 添加操作 **保存小红书笔记**（来自「小红书保存」），参数设成「快捷指令输入」。
+  4. 在小红书、B 站等 App 里点分享，选这个快捷指令。
+- 保存时 App 会被打开到前台，进度显示在「下载」页。
 
-| 笔记类型 | 保存结果 |
+| 来源 | 保存结果 |
 |---|---|
-| 图文笔记 | 每张图的原图（通常是 HEIC） |
-| 含实况图的笔记 | 实况图存成实况照片；普通图存原图 |
-| 视频笔记 | 原视频，拿不到时改存网页版视频 |
+| 小红书图文 | 每张图的原图（通常是 HEIC） |
+| 小红书实况图 | 实况照片；普通图存原图 |
+| 小红书视频 | 原视频 |
+| 其它网站 | yt-dlp 下载，优先 H.264 + AAC、最高 1080p；音视频分开的自动合并。相册不支持的格式存到「文件 → 小红书保存 → 下载」 |
+
+**原图 / 原片拿不到时**会弹窗询问：改存这一项、本次全部改存替代版本，或跳过。实况合成失败时也会先问你是否只存静态图。
+
+### 实况工具
+
+- **视频转实况**：从相册或「文件」选一段视频，拖动滑块选开始位置、时长（最长 5 秒）和封面帧，生成实况照片存进相册。
+- **实况拆分**：选一张实况照片，拆成一张照片 + 一段视频存进相册，并在「文件 → 小红书保存 → 实况拆分」里各留一份。
+
+### 号池（cookies）
+
+App 的文件夹会出现在「文件 → 我的 iPhone → 小红书保存」里，号池就在其中的 `cookies` 文件夹：
+
+1. 电脑上照旧用 Get cookies.txt LOCALLY 导出，再用 `merge_cookies.py` 把同一账号的多个域名合并成一个 `.txt`。
+2. 把文件推到手机（Bundle ID 在 App 的「设置」页里能看到，AltStore 会在原 ID 后面加上你的团队 ID）：
+   ```bash
+   opendevice afc push --app <Bundle ID> --documents cookies/merged/au.txt /cookies/
+   ```
+   或者用 AirDrop / 「文件」App 直接拷进 `cookies` 文件夹。
+3. 「设置」页会列出每个账号文件包含哪些网站、有没有登录凭证（只显示名字，不显示内容）。
+
+规则与 `phone/dl.py` 相同：按网址自动挑出对应网站的账号轮流使用；小红书**先用游客**（游客能拿到原片），失败才用账号；其它网站账号优先、游客垫底。
+
+> cookie 只存在手机上，不会进入仓库或安装包。仓库和 ipa 都是公开的，**不要把 cookies 文件提交到 GitHub**。
+
+### 更新 yt-dlp
+
+网站改版导致下载失败时，打开「设置 → 更新 yt-dlp 到最新版」，App 会从 yt-dlp 官方 GitHub 下载最新版并立即生效，不用重新安装。出问题时可以「恢复内置版本」。
 
 ## 五、离线检查解析逻辑
 

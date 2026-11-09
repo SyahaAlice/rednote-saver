@@ -7,5 +7,10 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<!-- 让 App 的 Documents（号池 cookies、下载、实况拆分）出现在「文件」App 里，电脑也能用 AFC 推文件进来 -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>

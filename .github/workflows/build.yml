@@ -1,4 +1,4 @@
-# 在 GitHub 的 macOS 机器上编译未签名的 .ipa，作为 artifact 上传；
+# 在 GitHub 的 macOS 机器上编译未签名的 .ipa，作为 artifact 上传并发布到 latest；
 # 下载后在 Windows 上用 AltServer / Sideloadly 签名安装。
 name: Build unsigned IPA
 
@@ -9,15 +9,38 @@ on:
 permissions:
   contents: write  # 用来更新 latest 发布页，ipa 可直接下载
 
+env:
+  # Python 官方 iOS 支持包（BeeWare 打包，CPython 3.13），固定版本并校验 SHA-256
+  PY_SUPPORT_URL: https://github.com/beeware/Python-Apple-support/releases/download/3.13-b18/Python-3.13-iOS-support.b18.tar.gz
+  PY_SUPPORT_SHA256: d06acf2a9c7964a8689566353a0e707402eff822037de5e29ba0e16040f7047d
+
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: Xcode version
         run: xcodebuild -version
+
+      - name: Fetch Python for iOS
+        run: |
+          curl -sSL -o py.tar.gz "$PY_SUPPORT_URL"
+          echo "$PY_SUPPORT_SHA256  py.tar.gz" | shasum -a 256 -c -
+          tar -xzf py.tar.gz Python.xcframework
+          rm py.tar.gz
+
+      - name: Install yt-dlp and certifi into app_packages
+        run: |
+          python -m pip install --no-deps --target app_packages yt-dlp certifi
+          python -c "import sys; sys.path.insert(0, 'app_packages'); import yt_dlp; print('yt-dlp', yt_dlp.version.__version__)"
+          # 预编译 .pyc（与手机上的 Python 3.13 同一版本），加快启动
+          python -m compileall -q -j 0 --invalidation-mode unchecked-hash app app_packages Python.xcframework/lib
 
       - name: Build
         run: |
@@ -31,7 +54,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build 2>&1 | tee build.log | grep -E "error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)" || true
+            build 2>&1 | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)|Installing Python|Install Python" || true
           # 把编译错误转成 GitHub 注释，在运行页面上直接能看到
           grep -E "^/.+:[0-9]+:[0-9]+: error: " build.log | sort -u | head -20 | \
             sed -E "s#^$PWD/##; s#^([^:]+):([0-9]+):([0-9]+): error: (.*)#::error file=\1,line=\2,col=\3::\4#" || true
@@ -39,13 +62,25 @@ jobs:
             sed -E "s#^#::error::#" || true
           test -d build/Release-iphoneos/XHSSaver.app
 
+      - name: Check app bundle
+        run: |
+          APP=build/Release-iphoneos/XHSSaver.app
+          ls "$APP"
+          test -f "$APP/Frameworks/Python.framework/Python" || echo "::error::Python.framework 没有嵌入"
+          test -f "$APP/python/lib/python3.13/os.py" || echo "::error::Python 标准库没有安装"
+          test -f "$APP/app/dlcore.py" || echo "::error::dlcore.py 没有打包"
+          test -d "$APP/app_packages/yt_dlp" || echo "::error::yt-dlp 没有打包"
+          test -d "$APP/Metadata.appintents" || echo "::warning::没有生成 App Intents 元数据"
+          echo "Frameworks: $(ls "$APP/Frameworks" | wc -l)"
+          du -sh "$APP"
+          echo "::notice::App 大小 $(du -sh "$APP" | cut -f1)，Frameworks $(ls "$APP/Frameworks" | wc -l) 个"
+
       - name: Package IPA
         run: |
           mkdir -p Payload
           cp -R build/Release-iphoneos/XHSSaver.app Payload/
-          ls Payload/XHSSaver.app
-          ls Payload/XHSSaver.app/Metadata.appintents || echo "注意：没有生成 App Intents 元数据"
           zip -qry XHSSaver.ipa Payload
+          ls -l XHSSaver.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4

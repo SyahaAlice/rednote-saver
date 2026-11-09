@@ -40,10 +40,31 @@ enum LivePhotoMaker {
         return dst
     }
 
+    /// 用一帧画面（例如视频截图）生成带配对标记的封面图，优先存 HEIC
+    static func makeImage(from image: CGImage, in dir: URL, name: String, identifier: String) throws -> URL {
+        let writable = (CGImageDestinationCopyTypeIdentifiers() as? [String]) ?? []
+        let type: UTType = writable.contains(UTType.heic.identifier) ? .heic : .jpeg
+        let dst = dir.appendingPathComponent(name).appendingPathExtension(type.preferredFilenameExtension ?? "jpg")
+        try? FileManager.default.removeItem(at: dst)
+        guard let dest = CGImageDestinationCreateWithURL(dst as CFURL, type.identifier as CFString, 1, nil) else {
+            throw XHSError("无法创建实况封面图文件")
+        }
+        let props: [CFString: Any] = [
+            kCGImagePropertyMakerAppleDictionary: ["17": identifier],
+            kCGImagePropertyOrientation: 1,
+            kCGImageDestinationLossyCompressionQuality: 0.95,
+        ]
+        CGImageDestinationAddImage(dest, image, props as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw XHSError("实况封面图写入失败") }
+        return dst
+    }
+
     // MARK: - 视频
 
-    /// 原样拷贝视频和音频数据（不重新编码），只加上配对用的元数据，输出 .mov
-    static func makeVideo(from src: URL, in dir: URL, name: String, identifier: String) async throws -> URL {
+    /// 原样拷贝视频和音频数据（不重新编码），只加上配对用的元数据，输出 .mov。
+    /// stillTime 是封面在视频里的时间点，不传就取中间那一帧
+    static func makeVideo(from src: URL, in dir: URL, name: String, identifier: String,
+                          stillTime: CMTime? = nil) async throws -> URL {
         let dst = dir.appendingPathComponent(name).appendingPathExtension("mov")
         try? FileManager.default.removeItem(at: dst)
 
@@ -109,7 +130,8 @@ enum LivePhotoMaker {
 
         // 封面对应视频中间那一帧
         let frame = CMTime(value: 1, timescale: CMTimeScale(max(1, Int32((fps > 0 ? fps : 30).rounded()))))
-        let still = CMTimeMultiplyByFloat64(duration, multiplier: 0.5)
+        var still = stillTime ?? CMTimeMultiplyByFloat64(duration, multiplier: 0.5)
+        if still >= duration { still = CMTimeMultiplyByFloat64(duration, multiplier: 0.5) }
         adaptor.append(AVTimedMetadataGroup(items: [stillImageTimeItem()],
                                             timeRange: CMTimeRange(start: still, duration: frame)))
         mIn.markAsFinished()
