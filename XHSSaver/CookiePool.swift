@@ -120,42 +120,68 @@ enum CookiePool {
         }
     }
 
-    /// 各网站表示「已登录」的 cookie 名（只看名字，不读值）
-    static let loginCookieNames: Set<String> = [
-        "web_session",                     // 小红书 / rednote
-        "sessionid", "sessionid_ss", "sid_tt",  // 抖音
-        "SESSDATA",                        // B 站
-        "SUB",                             // 微博
-        "auth_token",                      // X
+    /// 各网站表示「已登录」的 cookie 名（只看名字，不读值）。没列出的网站没法判断登录状态
+    static let loginCookieNames: [String: Set<String>] = [
+        "xiaohongshu.com": ["web_session"],                       // 小红书 / rednote
+        "douyin.com": ["sessionid", "sessionid_ss", "sid_tt"],
+        "bilibili.com": ["SESSDATA"],
+        "weibo.com": ["SUB"],
+        "x.com": ["auth_token"],
+        "instagram.com": ["sessionid"],
     ]
 
-    /// 账号状态：正常 / 已过期 / 未登录（未激活）
+    /// 账号状态：正常 / 已过期 / 未登录（未激活）/ 无法判断
     enum Health: Equatable {
         case ok(expires: Date?)
         case expired
         case notLoggedIn
+        /// 这个网站不在 loginCookieNames 里，看不出有没有登录；不算失效，不提示补登
+        case unknown
 
-        var needsLogin: Bool { if case .ok = self { return false } else { return true } }
+        /// 只有确认失效或未激活的才提示补登
+        var needsLogin: Bool { self == .expired || self == .notLoggedIn }
         var text: String {
             switch self {
             case .ok(let d): return d.map { "正常（登录有效期到 " + $0.formatted(date: .abbreviated, time: .omitted) + "）" } ?? "正常"
             case .expired: return "已过期，需要补登"
             case .notLoggedIn: return "未登录（未激活），需要补登"
+            case .unknown: return "无法判断登录状态（这个网站没有内置的检查规则）"
             }
         }
     }
 
-    static func health(of file: URL) -> Health {
-        let login = entries(in: file).filter { loginCookieNames.contains($0.name) }
-        guard !login.isEmpty else { return .notLoggedIn }
-        let alive = login.filter { ($0.expires ?? .distantFuture) > Date() }
-        guard !alive.isEmpty else { return .expired }
-        return .ok(expires: alive.compactMap(\.expires).min())
+    /// site 传网站名（例如 bilibili.com）时只看这个网站的 cookie；
+    /// 不传时看文件里所有认识的网站，有一个失效就算失效
+    static func health(of file: URL, site: String? = nil) -> Health {
+        var bySite: [String: [Entry]] = [:]
+        for e in entries(in: file) {
+            let s = self.site(of: e.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")))
+            bySite[s, default: []].append(e)
+        }
+        func one(_ s: String) -> Health {
+            guard let names = loginCookieNames[s] else { return .unknown }
+            let login = (bySite[s] ?? []).filter { names.contains($0.name) }
+            guard !login.isEmpty else { return .notLoggedIn }
+            let alive = login.filter { ($0.expires ?? .distantFuture) > Date() }
+            guard !alive.isEmpty else { return .expired }
+            return .ok(expires: alive.compactMap(\.expires).min())
+        }
+        if let site { return one(site) }
+        let known = bySite.keys.filter { loginCookieNames[$0] != nil }.map(one)
+        if known.isEmpty { return .unknown }
+        if known.contains(.expired) { return .expired }
+        if known.contains(.notLoggedIn) { return .notLoggedIn }
+        let dates = known.compactMap { h -> Date? in
+            if case .ok(let d) = h { return d }
+            return nil
+        }
+        return .ok(expires: dates.min())
     }
 
-    /// 这个网站的号池账号里有没有失效 / 未激活的
+    /// 这个网站的号池账号里有没有确认失效 / 未激活的（无法判断的不算）
     static func hasProblem(for url: URL) -> Bool {
-        candidates(for: url, rotate: false).compactMap { $0 }.contains { health(of: $0).needsLogin }
+        let s = site(of: url.host ?? "")
+        return candidates(for: url, rotate: false).compactMap { $0 }.contains { health(of: $0, site: s).needsLogin }
     }
 
     /// 小红书：带这个账号的 cookie 打开小红书，看网页认不认为已登录（nil = 没法判断）

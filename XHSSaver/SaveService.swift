@@ -43,6 +43,8 @@ final class SaveService: ObservableObject {
     private var promptContinuation: CheckedContinuation<Int?, Never>?
     private var albumContinuation: CheckedContinuation<AlbumDecision, Never>?
     private var useFallbackForAll = false
+    /// 正在跑的保存任务，「取消」时用
+    private var current: Task<String, Error>?
     private var referer = ""
     private var target = SaveTarget()
 
@@ -53,7 +55,8 @@ final class SaveService: ObservableObject {
     // MARK: - 提问
 
     func ask(_ title: String, _ message: String, options: [String], cancel: String = "跳过") async -> Int? {
-        await withCheckedContinuation { c in
+        if Task.isCancelled { return nil }  // 已经点了取消，不再弹窗
+        return await withCheckedContinuation { c in
             promptContinuation = c
             prompt = ChoicePrompt(title: title, message: message, options: options, cancelLabel: cancel)
         }
@@ -103,6 +106,7 @@ final class SaveService: ObservableObject {
 
     /// 弹出抖音内置浏览器并等它读到作品数据
     func runCapture(_ cap: DouyinCapture) async throws -> [String: Any] {
+        try checkCancelled()
         capture = cap
         defer { capture = nil }
         return try await cap.run()
@@ -116,8 +120,40 @@ final class SaveService: ObservableObject {
         isRunning = true
         log = []
         useFallbackForAll = false
-        defer { isRunning = false }
+        let task = Task { @MainActor in try await self.run(text: text) }
+        current = task
+        defer {
+            current = nil
+            isRunning = false
+        }
+        // 调用方（比如快捷指令）被取消时，也一起取消
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
 
+    /// 「取消」按钮：停掉正在进行的保存。
+    /// 除了取消任务，还要把所有正在等用户回答的弹窗 / 页面都收掉，否则流程会一直卡在等待上
+    func cancel() {
+        guard isRunning, let task = current else { return }
+        if !task.isCancelled {
+            say("正在取消…")
+            task.cancel()
+        }
+        if prompt != nil { answer(nil) }
+        if albumRequest != nil { decideAlbum(.none) }
+        if loginAccount != nil { loginFinished() }
+        capture?.cancel()
+    }
+
+    /// 用户点了取消就在这里停下（各个步骤之间调用）
+    private func checkCancelled() throws {
+        if Task.isCancelled { throw XHSError("已取消") }
+    }
+
+    private func run(text: String) async throws -> String {
         do {
             guard let url = NoteParser.extractURL(text) else { throw XHSError("没找到链接") }
             try await PhotoSaver.ensureAccess()
@@ -125,6 +161,7 @@ final class SaveService: ObservableObject {
             do {
                 summary = try await attempt(url)
             } catch {
+                try checkCancelled()
                 // 失败时可以直接在内置浏览器里补登这个网站，登录后自动重试一次
                 let site = CookiePool.site(of: url.host ?? "")
                 say("失败：" + error.localizedDescription)
@@ -136,8 +173,10 @@ final class SaveService: ObservableObject {
                 let reason = badPool ? "号池里\(site)的 cookie 已失效或未激活。" : "看起来需要登录。"
                 guard await ask("\(site) 没有保存成功", reason + "要用内置浏览器登录（补登）后重试吗？",
                                 options: ["登录后重试"], cancel: "不用了") != nil else { throw error }
+                try checkCancelled()
                 let account = WebAccounts.shared.accountForLogin(url: url)
                 await runLogin(account)
+                try checkCancelled()
                 let n = await WebAccounts.shared.exportCookies(account)  // 等 cookie 写进号池再重试
                 say("已更新「\(account.name)」的 cookie（\(n) 条），重试…")
                 summary = try await attempt(url)
@@ -145,18 +184,22 @@ final class SaveService: ObservableObject {
             say("✅ " + summary)
             return summary
         } catch {
-            say("❌ " + error.localizedDescription)
-            throw error
+            // 取消时底层报的是各种各样的错（网络请求被取消等），统一说成「已取消」
+            let shown: Error = Task.isCancelled ? XHSError("已取消") : error
+            say("❌ " + shown.localizedDescription)
+            throw shown
         }
     }
 
     private func attempt(_ url: URL) async throws -> String {
         let note = try await Extractors.pick(for: url).extract(url, service: self)
         defer { if let d = note.workDir { try? FileManager.default.removeItem(at: d) } }
+        try checkCancelled()
         return try await save(note)
     }
 
-    private func save(_ note: ParsedNote) async throws -> String {
+    private func save(_ parsed: ParsedNote) async throws -> String {
+        var note = parsed
         let title = note.title.isEmpty ? note.id : String(note.title.prefix(40))
         say("\(note.platform)：\(title)（\(note.items.count) 项）")
         if let a = note.author { say("作者：\(a.name)（\(a.primaryID)）") }
@@ -166,6 +209,7 @@ final class SaveService: ObservableObject {
             let when = last.formatted(date: .abbreviated, time: .shortened)
             if await ask("这个作品已经保存过", "上次保存于 \(when)。要再保存一次吗？",
                          options: ["再保存一次"], cancel: "不用了") == nil {
+                try checkCancelled()
                 return "已跳过（之前保存过）"
             }
         }
@@ -178,10 +222,19 @@ final class SaveService: ObservableObject {
         if Prefs.askAlbum {
             target.album = try await chooseAlbum(for: note)
         }
+        try checkCancelled()
 
-        let summary = try await saveItems(note)
-        History.record(note.historyKey)
-        return summary
+        // yt-dlp 的作品到这里才真正下载（查重、选相册都在下载之前）
+        if let fetch = note.fetch {
+            note.items = try await fetch()
+            note.fetch = nil
+            try checkCancelled()
+        }
+
+        let result = try await saveItems(note)
+        // 有失败项时不记：下次再存不会被当成「已经保存过」
+        if result.complete { History.record(note.historyKey) }
+        return result.summary
     }
 
     // MARK: - 相册归类
@@ -195,6 +248,7 @@ final class SaveService: ObservableObject {
             say("没有「完整照片访问」权限，读不到已有相册，这次不做相册归类（可在系统设置里改）")
             return nil
         }
+        try checkCancelled()
         let request = AlbumRequest(platform: note.platform, author: author,
                                    suggestedName: Albums.ruleName(platform: note.platform, author: author),
                                    matches: Albums.matches(for: author))
@@ -217,13 +271,15 @@ final class SaveService: ObservableObject {
 
     // MARK: - 下载并存进相册
 
-    private func saveItems(_ note: ParsedNote) async throws -> String {
+    /// complete = 存了东西而且没有失败项（用户自己选择跳过的不算失败）
+    private func saveItems(_ note: ParsedNote) async throws -> (summary: String, complete: Bool) {
         referer = note.referer
         let dir = try LiveTools.workDir("note-\(note.id)")
         defer { try? FileManager.default.removeItem(at: dir) }
 
         var images = 0, lives = 0, videos = 0, skipped = 0, failures = 0
         for (i, item) in note.items.enumerated() {
+            try checkCancelled()
             let n = String(format: "%02d", i + 1)
             do {
                 switch item.kind {
@@ -252,6 +308,7 @@ final class SaveService: ObservableObject {
                     }
                 }
             } catch {
+                try checkCancelled()
                 failures += 1
                 say("第 \(n) 项失败：\(error.localizedDescription)")
             }
@@ -266,17 +323,19 @@ final class SaveService: ObservableObject {
         if let album = target.album?.localizedTitle { summary += "（相册：\(album)）" }
         if skipped > 0 { summary += "，跳过 \(skipped) 项" }
         if failures > 0 { summary += "，\(failures) 项失败" }
-        return summary
+        return (summary, !parts.isEmpty && failures == 0)
     }
 
     /// 已下载好的文件直接用；否则先下首选地址，失败时问用户是否改用替代版本。返回 nil 表示跳过
     private func fileFor(_ item: NoteMedia, dir: URL, name: String, what: String) async throws -> URL? {
+        if let e = item.error { throw XHSError(e) }
         if let f = item.localFile { return f }
         var firstError: Error?
         if !item.original.isEmpty {
             do {
                 return try await Downloader.download(item.original, to: dir, name: name, referer: referer)
             } catch {
+                try checkCancelled()
                 firstError = error
                 say("第 \(name) 项\(what)下载失败：\(error.localizedDescription)")
             }
@@ -287,6 +346,7 @@ final class SaveService: ObservableObject {
             switch await ask("第 \(name) 项拿不到\(what)", "要改存\(replacement)吗？",
                              options: ["改存这一项", "本次全部改存替代版本"]) {
             case nil:
+                try checkCancelled()
                 say("第 \(name) 项已跳过")
                 return nil
             case 1?:
@@ -315,8 +375,10 @@ final class SaveService: ObservableObject {
             }
             return .live
         } catch {
+            try checkCancelled()
             say("第 \(name) 项实况合成失败：\(error.localizedDescription)")
             if await ask("第 \(name) 项实况合成失败", "要只存这张的静态图吗？", options: ["只存静态图"]) == nil {
+                try checkCancelled()
                 return .skipped
             }
             try await PhotoSaver.saveImage(still, target: target)

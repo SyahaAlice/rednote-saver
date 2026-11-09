@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write  # 用来更新 latest 发布页，ipa 可直接下载
 
+# 同一个分支连续推送时，只编译最新的那一次
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   # Python 官方 iOS 支持包（BeeWare 打包，CPython 3.13），固定版本并校验 SHA-256
   PY_SUPPORT_URL: https://github.com/beeware/Python-Apple-support/releases/download/3.13-b18/Python-3.13-iOS-support.b18.tar.gz
@@ -69,14 +74,17 @@ jobs:
         run: |
           APP=build/Release-iphoneos/XHSSaver.app
           ls "$APP"
-          test -f "$APP/Frameworks/Python.framework/Python" || echo "::error::Python.framework 没有嵌入"
-          test -f "$APP/python/lib/python3.13/os.py" || echo "::error::Python 标准库没有安装"
-          test -f "$APP/app/dlcore.py" || echo "::error::dlcore.py 没有打包"
-          test -d "$APP/app_packages/yt_dlp" || echo "::error::yt-dlp 没有打包"
+          # 缺了这几样的包装上也用不了：标出来并让这次编译失败，不发布
+          missing=0
+          test -f "$APP/Frameworks/Python.framework/Python" || { echo "::error::Python.framework 没有嵌入"; missing=1; }
+          test -f "$APP/python/lib/python3.13/os.py" || { echo "::error::Python 标准库没有安装"; missing=1; }
+          test -f "$APP/app/dlcore.py" || { echo "::error::dlcore.py 没有打包"; missing=1; }
+          test -d "$APP/app_packages/yt_dlp" || { echo "::error::yt-dlp 没有打包"; missing=1; }
           test -d "$APP/Metadata.appintents" || echo "::warning::没有生成 App Intents 元数据"
           echo "Frameworks: $(ls "$APP/Frameworks" | wc -l)"
           du -sh "$APP"
           echo "::notice::App 大小 $(du -sh "$APP" | cut -f1)，Frameworks $(ls "$APP/Frameworks" | wc -l) 个"
+          test "$missing" -eq 0
 
       - name: Package IPA
         run: |
@@ -96,11 +104,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest XHSSaver.ipa \
-            --target "$GITHUB_SHA" \
-            --title "最新版（$(date -u +%Y-%m-%d) · ${GITHUB_SHA:0:7}）" \
-            --notes "未签名的 ipa。下载后用 AltServer 的 Sideload .ipa 安装，或存到手机「文件」里用 AltStore 安装。"
+          TITLE="最新版（$(date -u +%Y-%m-%d) · ${GITHUB_SHA:0:7}）"
+          NOTES="未签名的 ipa。下载后用 AltServer 的 Sideload .ipa 安装，或存到手机「文件」里用 AltStore 安装。"
+          if gh release view latest >/dev/null 2>&1; then
+            # 原地更新：下载链接不会中途失效。先换文件，最后才改标题（标题里的 sha 变了 = 新包已就绪）
+            git tag -f latest "$GITHUB_SHA"
+            git push -f origin refs/tags/latest
+            gh release upload latest XHSSaver.ipa --clobber
+            gh release edit latest --target "$GITHUB_SHA" --title "$TITLE" --notes "$NOTES"
+          else
+            gh release create latest XHSSaver.ipa --target "$GITHUB_SHA" --title "$TITLE" --notes "$NOTES"
+          fi
 
       - name: Upload build log
         if: always()

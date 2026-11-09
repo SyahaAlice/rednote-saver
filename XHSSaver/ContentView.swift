@@ -51,6 +51,7 @@ struct DownloadView: View {
                     header
                     inputCard
                     saveButton
+                    if service.isRunning { cancelButton }
                     if !service.log.isEmpty { progressCard }
                     featuresCard
                 }
@@ -153,6 +154,17 @@ struct DownloadView: View {
         .accessibilityIdentifier("save")
     }
 
+    // 保存过程中随时可以停下（大视频下错了、弹窗卡住时用）
+    private var cancelButton: some View {
+        Button(role: .cancel) {
+            service.cancel()
+        } label: {
+            Label("取消", systemImage: "xmark.circle")
+        }
+        .buttonStyle(ChipButtonStyle())
+        .accessibilityIdentifier("cancel")
+    }
+
     // 进度：时间线样式，最新一行加粗
     private var progressCard: some View {
         Card {
@@ -198,7 +210,7 @@ private struct LogRow: View {
     private var style: (icon: String, color: Color, text: String) {
         if line.hasPrefix("✅") { return ("checkmark.circle.fill", .green, String(line.dropFirst(2))) }
         if line.hasPrefix("❌") { return ("xmark.octagon.fill", .red, String(line.dropFirst(2))) }
-        if line.hasPrefix("⚠️") { return ("exclamationmark.triangle.fill", .orange, String(line.dropFirst(3))) }
+        if line.hasPrefix("⚠️") { return ("exclamationmark.triangle.fill", .orange, String(line.dropFirst(2))) }
         if line.hasPrefix("失败") || line.contains("失败：") { return ("exclamationmark.circle", .orange, line) }
         if line.hasPrefix("下载中") { return ("arrow.down.circle", .accentColor, line) }
         return ("circle.fill", Color(.tertiaryLabel), line)

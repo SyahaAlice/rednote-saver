@@ -143,10 +143,13 @@ struct SettingsView: View {
                     ForEach(accounts) { a in
                         let online = onlineResults[a.name]
                         let bad = a.health.needsLogin || online == false
+                        // 无法判断登录状态（没有内置检查规则的网站）：中性图标，不提示补登
+                        let unknown = !bad && a.health == .unknown && online == nil
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Image(systemName: bad ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
-                                    .foregroundStyle(bad ? .orange : .green)
+                                Image(systemName: bad ? "exclamationmark.triangle.fill"
+                                      : unknown ? "questionmark.circle.fill" : "checkmark.seal.fill")
+                                    .foregroundStyle(bad ? Color.orange : unknown ? Color.secondary : Color.green)
                                 Text(a.name)
                                 Spacer()
                                 Text(a.sites.joined(separator: "、"))

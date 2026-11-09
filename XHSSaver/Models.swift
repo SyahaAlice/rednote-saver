@@ -19,6 +19,8 @@ struct NoteMedia {
     var liveVideoURLs: [URL] = []
     /// 已经下载好的本地文件（yt-dlp 下载的内容走这里，不再联网）
     var localFile: URL?
+    /// 这一项在解析 / 下载阶段就已经失败（yt-dlp 多项帖子里的某一项）：保存时直接算作失败并显示这句说明
+    var error: String?
 }
 
 /// 作者信息：昵称可能重复，ID 通常唯一。ids 里放这个平台上所有能用来识别作者的 ID
@@ -44,6 +46,9 @@ struct ParsedNote {
     var referer: String = "https://www.xiaohongshu.com/"
     /// 解析器自己建的临时目录（yt-dlp 下载的文件在这里），保存完删除
     var workDir: URL?
+    /// 还没下载的作品（yt-dlp）：解析时只拿到标题、作者等信息，
+    /// 查重和选相册之后才调用它真正下载，返回的媒体项替换 items
+    var fetch: (@MainActor () async throws -> [NoteMedia])?
 
     var historyKey: String { "\(platform):\(id)" }
 }
