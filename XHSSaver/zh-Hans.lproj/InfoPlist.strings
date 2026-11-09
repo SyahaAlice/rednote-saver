@@ -2,3 +2,4 @@
 "CFBundleDisplayName" = "小红书保存";
 "CFBundleName" = "小红书保存";
 "NSPhotoLibraryAddUsageDescription" = "把小红书笔记里的图片、视频和实况照片存进相册";
+"NSPhotoLibraryUsageDescription" = "按作者查找你已有的相册，把保存的照片放进去（只读取相册名，不上传任何内容）";

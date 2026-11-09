@@ -193,6 +193,8 @@ target_cfg = {
     # 基础名称必须是英文：AltServer 用它向 Apple 注册 App ID；中文名在 zh-Hans.lproj/InfoPlist.strings
     "INFOPLIST_KEY_CFBundleDisplayName": NAME,
     "INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription": q("Save note images, videos and Live Photos to your library"),
+    # 相册归类要读取已有相册名，需要「完整照片访问」；缺这一项时申请权限会被系统直接结束 App
+    "INFOPLIST_KEY_NSPhotoLibraryUsageDescription": q("Find your existing albums by author to file saved items"),
     "INFOPLIST_KEY_UIApplicationSceneManifest_Generation": "YES",
     "INFOPLIST_KEY_UILaunchScreen_Generation": "YES",
     "INFOPLIST_KEY_UISupportedInterfaceOrientations": "UIInterfaceOrientationPortrait",

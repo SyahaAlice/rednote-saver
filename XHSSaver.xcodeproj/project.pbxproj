@@ -317,6 +317,7 @@
 				INFOPLIST_FILE = XHSSaver/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = XHSSaver;
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save note images, videos and Live Photos to your library";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Find your existing albums by author to file saved items";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -342,6 +343,7 @@
 				INFOPLIST_FILE = XHSSaver/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = XHSSaver;
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save note images, videos and Live Photos to your library";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Find your existing albums by author to file saved items";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
