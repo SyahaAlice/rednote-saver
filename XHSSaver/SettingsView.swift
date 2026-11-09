@@ -4,7 +4,8 @@ struct SettingsView: View {
     @ObservedObject private var web = WebAccounts.shared
     @State private var loginAccount: WebAccount?
     @State private var showAdd = false
-    @State private var accounts: [CookiePool.Summary] = []
+    /// 号池文件夹里的所有 cookies 文件（App 内登录导出的 + 电脑导入的）
+    @State private var pool: [CookiePool.Summary] = []
     @AppStorage(Prefs.imageFormatKey) private var imageFormat = Prefs.ImageFormat.heic.rawValue
     @AppStorage(Prefs.usePublishDateKey) private var usePublishDate = false
     @AppStorage(Prefs.askAlbumKey) private var askAlbum = true
@@ -103,117 +104,42 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    if web.accounts.isEmpty {
-                        Text("还没有账号。抖音必须登录才能保存；其它网站登录后能拿到更多内容。")
+                    if rows.isEmpty {
+                        Text("还没有账号：所有网站都以游客身份下载。抖音和 Instagram 帖子必须登录才能保存；其它网站登录后能拿到更多内容。")
                             .foregroundStyle(.secondary)
                     }
-                    ForEach(web.accounts) { a in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text(a.name)
-                                Spacer()
-                                Text(a.site).font(.caption).foregroundStyle(.secondary)
-                            }
-                            Text(a.lastExport.map { "cookie 更新于 " + $0.formatted(date: .abbreviated, time: .shortened) }
-                                 ?? "还没有登录")
-                                .font(.caption)
-                                .foregroundStyle(a.lastExport == nil ? .orange : .secondary)
-                            HStack {
-                                Button(a.lastExport == nil ? "登录" : "重新登录") { loginAccount = a }
-                                Spacer()
-                                Button("刷新 cookie") {
-                                    Task {
-                                        await web.exportCookies(a)
-                                        accounts = CookiePool.summaries()
-                                    }
-                                }
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                        .swipeActions {
-                            Button("删除", role: .destructive) {
-                                Task {
-                                    await web.remove(a)
-                                    accounts = CookiePool.summaries()
-                                }
-                            }
-                        }
+                    ForEach(rows) { row in
+                        accountRow(row)
                     }
                     Button("添加账号") { showAdd = true }
-                } header: {
-                    Label("账号（在 App 内登录）", systemImage: "person.crop.circle.badge.checkmark")
-                } footer: {
-                    Text("每个账号有独立的登录状态，登录后 cookie 会自动写进号池。cookie 失效时点「重新登录」。左滑可删除账号。")
-                }
-
-                Section {
-                    if accounts.isEmpty {
-                        Text("号池是空的：所有网站都以游客身份下载。")
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(accounts) { a in
-                        let online = onlineResults[a.name]
-                        let bad = a.health.needsLogin || online == false
-                        // 无法判断登录状态（没有内置检查规则的网站）：中性图标，不提示补登
-                        let unknown = !bad && a.health == .unknown && online == nil
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Image(systemName: bad ? "exclamationmark.triangle.fill"
-                                      : unknown ? "questionmark.circle.fill" : "checkmark.seal.fill")
-                                    .foregroundStyle(bad ? Color.orange : unknown ? Color.secondary : Color.green)
-                                Text(a.name)
-                                Spacer()
-                                Text(a.sites.joined(separator: "、"))
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Text(online == false ? "在线验证：已失效，需要补登" : a.health.text)
-                                .font(.caption)
-                                .foregroundStyle(bad ? .orange : .secondary)
-                            if online == true {
-                                Text("在线验证：小红书确认已登录").font(.caption).foregroundStyle(.green)
-                            }
-                            if bad, let site = a.sites.first {
-                                Button("用内置浏览器补登") {
-                                    let url = URL(string: "https://www.\(site)/")!
-                                    loginAccount = WebAccounts.shared.accountForLogin(url: url)
-                                }
-                                .buttonStyle(.borderless)
-                                .font(.callout)
-                            }
-                        }
-                        .swipeActions {
-                            Button("删除", role: .destructive) {
-                                try? FileManager.default.removeItem(at: a.file)
-                                accounts = CookiePool.summaries()
-                            }
-                        }
-                    }
                     HStack {
                         Button("重新读取") {
-                            accounts = CookiePool.summaries()
+                            pool = CookiePool.summaries()
                             onlineResults = [:]
                         }
                         Spacer()
                         Button(checking ? "正在验证…" : "在线验证小红书账号") {
                             Task {
                                 checking = true
-                                for a in accounts where a.sites.contains("xiaohongshu.com") {
+                                for a in pool where a.sites.contains("xiaohongshu.com") {
                                     if let r = await CookiePool.verifyOnline(a.file) { onlineResults[a.name] = r }
                                 }
                                 checking = false
                             }
                         }
-                        .disabled(checking || !accounts.contains { $0.sites.contains("xiaohongshu.com") })
+                        .disabled(checking || !pool.contains { $0.sites.contains("xiaohongshu.com") })
                     }
                     .buttonStyle(.borderless)
                 } header: {
-                    Label("号池（cookies 文件夹，含电脑导入的文件）", systemImage: "tray.full")
+                    Label("账号", systemImage: "person.crop.circle.badge.checkmark")
                 } footer: {
                     Text("""
-                    在电脑上用 merge_cookies.py 整理好 Netscape 格式的 .txt，推到 App 的 cookies 文件夹：
+                    这里是下载时会用到的所有账号（号池），两种来源放在一起：
+                    · App 内登录：点「添加账号」在内置浏览器里登录，每个账号的登录状态互相独立；cookie 失效时点「重新登录」。
+                    · 电脑导入：用 merge_cookies.py 整理好 Netscape 格式的 .txt，推到 App 的 cookies 文件夹：
                     opendevice afc push --app \(bundleID) 本地文件 /Documents/cookies/
-                    也可以在「文件 → 我的 iPhone → 多功能媒体下载器 → cookies」里直接放进去。
-                    只有失效或未激活的账号会显示「补登」。左滑可从号池删除。只显示文件名和网站，不显示 cookie 内容。
+                    也可以在「文件 → 我的 iPhone → 多功能媒体下载器 → cookies」里直接放进去，然后点「重新读取」。
+                    只有失效或未激活的账号会提示补登。电脑导入的文件补登后会多出一个 App 内登录的账号，原来的文件还在，确认不用了可以左滑删除。只显示名称和网站，不显示 cookie 内容。
                     """)
                     .textSelection(.enabled)
                 }
@@ -261,7 +187,7 @@ struct SettingsView: View {
             } message: {
                 Text("清空后，保存过的作品再存时不会再提醒。相册里已经保存的照片和视频不受影响。这一步不能撤销。")
             }
-            .sheet(item: $loginAccount, onDismiss: { accounts = CookiePool.summaries() }) { a in
+            .sheet(item: $loginAccount, onDismiss: { pool = CookiePool.summaries() }) { a in
                 WebLoginView(account: a)
             }
             .sheet(isPresented: $showAdd) {
@@ -271,9 +197,87 @@ struct SettingsView: View {
                 }
             }
             .task {
-                accounts = CookiePool.summaries()
+                pool = CookiePool.summaries()
                 historyCount = History.count
                 if version == nil { await run { try await YtDlp.version() } }
+            }
+        }
+    }
+
+    /// 账号列表：先是 App 内登录的账号（连同它导出到号池的文件），再是号池里其余的文件（电脑导入的）
+    private var rows: [AccountRow] {
+        var out: [AccountRow] = []
+        var used = Set<String>()
+        for a in web.accounts {
+            let file = pool.first { $0.name == a.cookieFileName }
+            if file != nil { used.insert(a.cookieFileName) }
+            out.append(AccountRow(id: a.id.uuidString, account: a, file: file))
+        }
+        for f in pool where !used.contains(f.name) {
+            out.append(AccountRow(id: "file:" + f.name, account: nil, file: f))
+        }
+        return out
+    }
+
+    @ViewBuilder
+    private func accountRow(_ row: AccountRow) -> some View {
+        let online: Bool? = row.file.flatMap { onlineResults[$0.name] }
+        let health: CookiePool.Health? = row.file?.health
+        let neverLoggedIn = row.account != nil && row.account?.lastExport == nil
+        let bad = neverLoggedIn || health?.needsLogin == true || online == false
+        // 无法判断登录状态（没有内置检查规则的网站）：中性图标，不提示补登
+        let unknown = !bad && online == nil && (health == nil || health == CookiePool.Health.unknown)
+        let icon = bad ? "exclamationmark.triangle.fill" : unknown ? "questionmark.circle.fill" : "checkmark.seal.fill"
+        let tint = bad ? Color.orange : unknown ? Color.secondary : Color.green
+        let status: String = online == false ? "在线验证：已失效，需要补登"
+            : neverLoggedIn ? "还没有登录"
+            : (health?.text ?? "还没有导出 cookie")
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: icon).foregroundStyle(tint)
+                Text(row.title)
+                Spacer()
+                Text(row.sites).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(row.source).font(.caption).foregroundStyle(.secondary)
+            Text(status).font(.caption).foregroundStyle(bad ? Color.orange : Color.secondary)
+            if online == true {
+                Text("在线验证：小红书确认已登录").font(.caption).foregroundStyle(.green)
+            }
+            if let a = row.account {
+                HStack {
+                    Button(a.lastExport == nil ? "登录" : "重新登录") { loginAccount = a }
+                    Spacer()
+                    Button("刷新 cookie") {
+                        Task {
+                            await web.exportCookies(a)
+                            pool = CookiePool.summaries()
+                        }
+                    }
+                }
+                .buttonStyle(.borderless)
+                .font(.callout)
+            } else if bad, let site = row.file?.sites.first {
+                Button("用内置浏览器补登") {
+                    let url = URL(string: "https://www.\(site)/")!
+                    loginAccount = WebAccounts.shared.accountForLogin(url: url)
+                }
+                .buttonStyle(.borderless)
+                .font(.callout)
+            }
+        }
+        .swipeActions {
+            Button("删除", role: .destructive) {
+                if let a = row.account {
+                    // App 内登录的账号：登录状态和它在号池里的文件一起删
+                    Task {
+                        await web.remove(a)
+                        pool = CookiePool.summaries()
+                    }
+                } else if let f = row.file {
+                    try? FileManager.default.removeItem(at: f.file)
+                    pool = CookiePool.summaries()
+                }
             }
         }
     }
@@ -287,6 +291,22 @@ struct SettingsView: View {
         } catch {
             versionError = error.localizedDescription
         }
+    }
+}
+
+/// 设置页账号列表的一行：App 内登录的账号（file 是它导出到号池的文件，还没登录时为 nil），
+/// 或者号池里一个电脑导入的文件（account 为 nil）
+private struct AccountRow: Identifiable {
+    let id: String
+    let account: WebAccount?
+    let file: CookiePool.Summary?
+
+    var title: String { account?.name ?? file?.name ?? "" }
+    var sites: String { account?.site ?? (file?.sites.joined(separator: "、") ?? "") }
+    var source: String {
+        guard let account else { return "电脑导入的文件" }
+        guard let t = account.lastExport else { return "App 内登录" }
+        return "App 内登录 · cookie 更新于 " + t.formatted(date: .abbreviated, time: .shortened)
     }
 }
 
