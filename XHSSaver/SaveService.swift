@@ -20,8 +20,11 @@ final class SaveService: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var log: [String] = []
     @Published var prompt: FallbackPrompt?
+    /// 抖音读取作品时弹出的内置浏览器
+    @Published var capture: DouyinCapture?
 
     private var promptContinuation: CheckedContinuation<FallbackChoice, Never>?
+    private var referer = "https://www.xiaohongshu.com/"
     private var useFallbackForAll = false
 
     func say(_ line: String) {
@@ -61,6 +64,8 @@ final class SaveService: ObservableObject {
             let summary: String
             if NoteParser.isXHS(url) {
                 summary = try await saveXHS(url)
+            } else if Douyin.isDouyin(url) {
+                summary = try await saveDouyin(url)
             } else {
                 summary = try await saveWithYtDlp(url)
             }
@@ -89,7 +94,32 @@ final class SaveService: ObservableObject {
             }
         }
         guard let note else { throw lastError }
-        say("笔记：\(note.title.isEmpty ? note.id : note.title)（\(note.items.count) 项）")
+        return try await saveNote(note)
+    }
+
+    // MARK: - 抖音
+
+    private func saveDouyin(_ url: URL) async throws -> String {
+        say("解析抖音链接…")
+        let ref = try await Douyin.resolve(url)
+        guard let account = WebAccounts.shared.accounts(for: "douyin.com").first else {
+            throw XHSError("抖音需要登录：请先到「设置 → 账号」添加一个抖音账号并登录")
+        }
+        say("用账号「\(account.name)」在内置浏览器里读取作品…")
+        let cap = DouyinCapture(account: account, target: ref)
+        capture = cap
+        defer { capture = nil }
+        let detail = try await cap.run()
+        capture = nil
+        await WebAccounts.shared.exportCookies(account)  // 顺便刷新号池里的抖音 cookie
+        return try await saveNote(try Douyin.parse(detail: detail))
+    }
+
+    // MARK: - 小红书 / 抖音共用的保存流程
+
+    private func saveNote(_ note: ParsedNote) async throws -> String {
+        say("作品：\(note.title.isEmpty ? note.id : String(note.title.prefix(40)))（\(note.items.count) 项）")
+        referer = note.referer
 
         let dir = try LiveTools.workDir("note-\(note.id)")
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -140,14 +170,14 @@ final class SaveService: ObservableObject {
         var originalError: Error?
         if !item.original.isEmpty {
             do {
-                return try await Downloader.download(item.original, to: dir, name: name)
+                return try await Downloader.download(item.original, to: dir, name: name, referer: referer)
             } catch {
                 originalError = error
                 say("第 \(name) 项\(what)下载失败：\(error.localizedDescription)")
             }
         }
         guard !item.fallback.isEmpty else { throw originalError ?? XHSError("没有可用的下载地址") }
-        let replacement = what == "原片" ? "网页版视频（压缩过，画质较低）" : "网页大图（压缩过，可能带水印）"
+        let replacement = what == "原片" ? "较低清晰度的视频" : "网页压缩图（可能带水印）"
         let choice = await ask("第 \(name) 项拿不到\(what)",
                                "要改存\(replacement)吗？",
                                useLabel: "改存这一项")
@@ -156,7 +186,7 @@ final class SaveService: ObservableObject {
             return nil
         }
         say("第 \(name) 项改存替代版本")
-        return try await Downloader.download(item.fallback, to: dir, name: "\(name)-fallback")
+        return try await Downloader.download(item.fallback, to: dir, name: "\(name)-fallback", referer: referer)
     }
 
     private func saveXHSVideo(_ item: NoteMedia, dir: URL, name: String) async throws -> Bool {
@@ -173,7 +203,7 @@ final class SaveService: ObservableObject {
             return .skipped
         }
         do {
-            let clip = try await Downloader.download(item.liveVideoURLs, to: dir, name: "\(name)-clip")
+            let clip = try await Downloader.download(item.liveVideoURLs, to: dir, name: "\(name)-clip", referer: referer)
             let id = UUID().uuidString
             let photo = try LivePhotoMaker.makeImage(from: still, in: dir, name: "\(name)-live", identifier: id)
             let video = try await LivePhotoMaker.makeVideo(from: clip, in: dir, name: "\(name)-live", identifier: id)

@@ -24,6 +24,8 @@ struct ParsedNote {
     var title: String
     var type: String
     var items: [NoteMedia]
+    /// 下载图片/视频时带的 Referer
+    var referer: String = "https://www.xiaohongshu.com/"
 }
 
 /// 解析逻辑与 phone/dl.py、diag.py 以及 tools/parse_proto.py 一一对应

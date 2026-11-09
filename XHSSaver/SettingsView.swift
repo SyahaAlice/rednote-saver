@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @ObservedObject private var web = WebAccounts.shared
+    @State private var loginAccount: WebAccount?
+    @State private var showAdd = false
     @State private var accounts: [CookiePool.Summary] = []
     @State private var version: YtDlp.Version?
     @State private var versionError = ""
@@ -11,6 +14,50 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    if web.accounts.isEmpty {
+                        Text("还没有账号。抖音必须登录才能保存；其它网站登录后能拿到更多内容。")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(web.accounts) { a in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(a.name)
+                                Spacer()
+                                Text(a.site).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Text(a.lastExport.map { "cookie 更新于 " + $0.formatted(date: .abbreviated, time: .shortened) }
+                                 ?? "还没有登录")
+                                .font(.caption)
+                                .foregroundStyle(a.lastExport == nil ? .orange : .secondary)
+                            HStack {
+                                Button(a.lastExport == nil ? "登录" : "重新登录") { loginAccount = a }
+                                Spacer()
+                                Button("刷新 cookie") {
+                                    Task {
+                                        await web.exportCookies(a)
+                                        accounts = CookiePool.summaries()
+                                    }
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        .swipeActions {
+                            Button("删除", role: .destructive) {
+                                Task {
+                                    await web.remove(a)
+                                    accounts = CookiePool.summaries()
+                                }
+                            }
+                        }
+                    }
+                    Button("添加账号") { showAdd = true }
+                } header: {
+                    Text("账号（在 App 内登录）")
+                } footer: {
+                    Text("每个账号有独立的登录状态，登录后 cookie 会自动写进号池。cookie 失效时点「重新登录」。左滑可删除账号。")
+                }
+
                 Section {
                     if accounts.isEmpty {
                         Text("号池是空的：所有网站都以游客身份下载。")
@@ -33,7 +80,7 @@ struct SettingsView: View {
                     }
                     Button("重新读取") { accounts = CookiePool.summaries() }
                 } header: {
-                    Text("号池（cookies 文件夹）")
+                    Text("号池（cookies 文件夹，含电脑导入的文件）")
                 } footer: {
                     Text("""
                     在电脑上用 merge_cookies.py 整理好 Netscape 格式的 .txt，推到 App 的 cookies 文件夹：
@@ -75,6 +122,15 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("设置")
+            .sheet(item: $loginAccount, onDismiss: { accounts = CookiePool.summaries() }) { a in
+                WebLoginView(account: a)
+            }
+            .sheet(isPresented: $showAdd) {
+                AddAccountView { account in
+                    showAdd = false
+                    loginAccount = account
+                }
+            }
             .task {
                 accounts = CookiePool.summaries()
                 if version == nil { await run { try await YtDlp.version() } }
@@ -90,6 +146,49 @@ struct SettingsView: View {
             versionError = ""
         } catch {
             versionError = error.localizedDescription
+        }
+    }
+}
+
+/// 添加账号：选网站（或填登录网址），然后进入登录页
+struct AddAccountView: View {
+    var onCreate: (WebAccount) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var custom = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("名称（可选）") {
+                    TextField("例如：抖音主号、小红书小号", text: $name)
+                }
+                Section("选择网站") {
+                    ForEach(SitePreset.all) { p in
+                        Button(p.title) {
+                            onCreate(WebAccounts.shared.add(name: name, preset: p))
+                        }
+                    }
+                }
+                Section("其它网站") {
+                    TextField("登录页网址，例如 https://x.com/login", text: $custom)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("使用这个网址") {
+                        let raw = custom.hasPrefix("http") ? custom : "https://" + custom
+                        if let url = URL(string: raw), url.host != nil {
+                            onCreate(WebAccounts.shared.add(name: name, url: url))
+                        }
+                    }
+                    .disabled(custom.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .navigationTitle("添加账号")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+            }
         }
     }
 }

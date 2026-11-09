@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """douyin_proto.py —— 抖音分享页解析原型（纯 Python 标准库，a-Shell 里也能跑）
 
-思路：抖音的公开分享页 iesdouyin.com/share/video/<id>/ 里直接带着作品数据
+⚠️ 2026-11-10 实测已失效：分享页的 _ROUTER_DATA 里不再带作品数据；作品详情接口对未登录访问
+直接返回 403。App 改为在内置浏览器里用登录过的抖音账号打开作品页读取数据（见 XHSSaver/Douyin.swift）。
+这个脚本只保留作参考：短链跳转、作品 ID 提取的逻辑仍然有效。
+
+原思路：抖音的公开分享页 iesdouyin.com/share/video/<id>/ 里直接带着作品数据
 （window._ROUTER_DATA），不需要签名参数。视频播放地址里的 playwm 换成 play 一般就是无水印版。
 
 用法：

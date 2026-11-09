@@ -23,6 +23,9 @@ struct ContentView: View {
         } message: { p in
             Text(p.message)
         }
+        .sheet(item: $service.capture) { cap in
+            DouyinCaptureView(capture: cap)
+        }
         .onAppear { CookiePool.prepareFolder() }
     }
 }

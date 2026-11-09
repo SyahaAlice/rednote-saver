@@ -2,11 +2,12 @@ import Foundation
 
 /// 下载文件到临时目录；按顺序尝试多个地址，第一个成功的就用
 enum Downloader {
-    static func download(_ urls: [URL], to dir: URL, name: String) async throws -> URL {
+    static func download(_ urls: [URL], to dir: URL, name: String,
+                         referer: String = "https://www.xiaohongshu.com/") async throws -> URL {
         var lastError: Error = XHSError("没有可用的下载地址")
         for url in urls {
             do {
-                return try await download(url, to: dir, name: name)
+                return try await download(url, to: dir, name: name, referer: referer)
             } catch {
                 lastError = error
             }
@@ -14,10 +15,11 @@ enum Downloader {
         throw lastError
     }
 
-    static func download(_ url: URL, to dir: URL, name: String) async throws -> URL {
+    static func download(_ url: URL, to dir: URL, name: String,
+                         referer: String = "https://www.xiaohongshu.com/") async throws -> URL {
         var req = URLRequest(url: url, timeoutInterval: 120)
         req.setValue(NoteParser.mobileUA, forHTTPHeaderField: "User-Agent")
-        req.setValue("https://www.xiaohongshu.com/", forHTTPHeaderField: "Referer")
+        req.setValue(referer, forHTTPHeaderField: "Referer")
         let (tmp, resp) = try await URLSession.shared.download(for: req)
         guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
             try? FileManager.default.removeItem(at: tmp)
