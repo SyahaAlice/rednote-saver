@@ -248,6 +248,9 @@ struct AlbumChoiceView: View {
     @State private var matches: [Albums.Match] = []
     @State private var confirming: Albums.Match?
     @State private var working = false
+    /// 点过「重新查找」：没有结果时也要告诉用户查过了、查的是什么
+    @State private var searched = false
+    @State private var searchedTerms: [String] = []
 
     private var resolved: [Albums.Entry] { Albums.resolve(entries) }
     private var generated: String { Albums.compose(style, entries) }
@@ -255,6 +258,8 @@ struct AlbumChoiceView: View {
     private func search() {
         let r = resolved
         matches = Albums.matches(ids: r.map(\.id) + request.author.ids, names: r.map(\.name))
+        searchedTerms = (r.map(\.cleanID) + r.map(\.name)).filter { !$0.isEmpty }
+        searched = true
     }
 
     /// 某个字段没填时，显示它会沿用的值
@@ -338,6 +343,17 @@ struct AlbumChoiceView: View {
                         Text("已有相册")
                     } footer: {
                         Text("任何一个账号的 ID 出现在相册名里就算匹配。点一下确认后放入；「仅用户名匹配」可能是同名的其他作者。")
+                    }
+                } else if searched {
+                    Section {
+                        Label("没有找到匹配的相册", systemImage: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                    } header: {
+                        Text("已有相册")
+                    } footer: {
+                        Text(searchedTerms.isEmpty
+                             ? "上面的账号还没有填 ID 或用户名，没有可以查找的内容。"
+                             : "查找了相册名里包含这些内容的相册：\(searchedTerms.joined(separator: "、"))。少于 4 个字符的 ID 和少于 2 个字的用户名不参与查找（太容易误匹配）。可以改一下上面的账号再查，或者在下面新建相册。")
                     }
                 }
 

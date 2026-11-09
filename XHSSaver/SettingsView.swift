@@ -9,6 +9,10 @@ struct SettingsView: View {
     @AppStorage(Prefs.usePublishDateKey) private var usePublishDate = false
     @AppStorage(Prefs.askAlbumKey) private var askAlbum = true
     @State private var historyCount = History.count
+    @State private var confirmClearHistory = false
+    /// 相册命名的两组设置平时很少改，默认收起
+    @State private var showPrefixes = false
+    @State private var showTemplates = false
     @State private var prefixes = Prefs.albumPrefixes
     @State private var newPlatform = ""
     @State private var onlineResults: [String: Bool] = [:]
@@ -31,11 +35,8 @@ struct SettingsView: View {
                     HStack {
                         Text("下载记录：\(historyCount) 条")
                         Spacer()
-                        Button("清空", role: .destructive) {
-                            History.clear()
-                            historyCount = History.count
-                        }
-                        .disabled(historyCount == 0)
+                        Button("清空", role: .destructive) { confirmClearHistory = true }
+                            .disabled(historyCount == 0)
                     }
                 } header: {
                     Label("保存", systemImage: "square.and.arrow.down")
@@ -48,47 +49,57 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    ForEach(Prefs.prefixPlatforms, id: \.self) { platform in
+                    DisclosureGroup(isExpanded: $showPrefixes) {
+                        ForEach(Prefs.prefixPlatforms, id: \.self) { platform in
+                            HStack {
+                                Text(platform)
+                                Spacer()
+                                TextField("前缀", text: Binding(
+                                    get: { prefixes[platform] ?? Prefs.idPrefix(for: platform) },
+                                    set: { prefixes[platform] = $0; Prefs.albumPrefixes = prefixes }))
+                                    .multilineTextAlignment(.trailing)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .frame(maxWidth: 140)
+                            }
+                        }
                         HStack {
-                            Text(platform)
-                            Spacer()
-                            TextField("前缀", text: Binding(
-                                get: { prefixes[platform] ?? Prefs.idPrefix(for: platform) },
-                                set: { prefixes[platform] = $0; Prefs.albumPrefixes = prefixes }))
-                                .multilineTextAlignment(.trailing)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .frame(maxWidth: 140)
+                            TextField("添加平台（例如 西瓜视频）", text: $newPlatform)
+                            Button("添加") {
+                                let p = newPlatform.trimmingCharacters(in: .whitespaces)
+                                guard !p.isEmpty else { return }
+                                prefixes[p] = Prefs.idPrefix(for: p)
+                                Prefs.albumPrefixes = prefixes
+                                newPlatform = ""
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(newPlatform.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
+                        Text("没列出来的平台自动用小写拼音首字母（西瓜视频 → xgsp_），英文名用小写全名。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } label: {
+                        Label("ID 前缀", systemImage: "number")
                     }
-                    HStack {
-                        TextField("添加平台（例如 西瓜视频）", text: $newPlatform)
-                        Button("添加") {
-                            let p = newPlatform.trimmingCharacters(in: .whitespaces)
-                            guard !p.isEmpty else { return }
-                            prefixes[p] = Prefs.idPrefix(for: p)
-                            Prefs.albumPrefixes = prefixes
-                            newPlatform = ""
-                        }
-                        .disabled(newPlatform.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                } header: {
-                    Label("相册命名：ID 前缀", systemImage: "number")
-                } footer: {
-                    Text("没列出来的平台自动用小写拼音首字母（西瓜视频 → xgsp_），英文名用小写全名。")
-                }
 
-                Section {
-                    LabeledTemplate(title: "常规", key: Prefs.templateNormalKey, placeholder: Prefs.defaultTemplateNormal)
-                    LabeledTemplate(title: "已注销 / 常删作品", key: Prefs.templateDeletedKey,
-                                    placeholder: Prefs.defaultTemplateDeleted)
-                    LabeledTemplate(title: "多账号之间的分隔", key: Prefs.multiSeparatorKey,
-                                    placeholder: Prefs.defaultMultiSeparator)
-                    TemplatePreview()
+                    DisclosureGroup(isExpanded: $showTemplates) {
+                        LabeledTemplate(title: "常规", key: Prefs.templateNormalKey,
+                                        placeholder: Prefs.defaultTemplateNormal)
+                        LabeledTemplate(title: "已注销 / 常删作品", key: Prefs.templateDeletedKey,
+                                        placeholder: Prefs.defaultTemplateDeleted)
+                        LabeledTemplate(title: "多账号之间的分隔", key: Prefs.multiSeparatorKey,
+                                        placeholder: Prefs.defaultMultiSeparator)
+                        TemplatePreview()
+                        Text("可用的占位符：{用户名} {前缀} {ID}。留空就用默认模板。多个账号时每个账号套一次模板，同一平台的排在一起，中间用分隔符。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } label: {
+                        Label("模板", systemImage: "textformat")
+                    }
                 } header: {
-                    Label("相册命名：模板", systemImage: "textformat")
+                    Label("相册命名", systemImage: "rectangle.stack.badge.person.crop")
                 } footer: {
-                    Text("可用的占位符：{用户名} {前缀} {ID}。留空就用默认模板。多个账号时每个账号套一次模板，同一平台的排在一起，中间用分隔符。")
+                    Text("点开可以改每个平台的 ID 前缀和相册名模板。")
                 }
 
                 Section {
@@ -241,6 +252,15 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("设置")
+            .confirmationDialog("清空下载记录？", isPresented: $confirmClearHistory, titleVisibility: .visible) {
+                Button("清空 \(historyCount) 条记录", role: .destructive) {
+                    History.clear()
+                    historyCount = History.count
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("清空后，保存过的作品再存时不会再提醒。相册里已经保存的照片和视频不受影响。这一步不能撤销。")
+            }
             .sheet(item: $loginAccount, onDismiss: { accounts = CookiePool.summaries() }) { a in
                 WebLoginView(account: a)
             }
