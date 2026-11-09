@@ -28,6 +28,8 @@ struct Author {
     var primaryID: String
     /// 匹配已有相册时用的所有 ID
     var ids: [String]
+    /// 起相册名时 ID 的叫法，例如「小红书号」「抖音号」
+    var idLabel: String = "作者 ID"
 }
 
 /// 任何网站解析出来的统一结果

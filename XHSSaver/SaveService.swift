@@ -130,7 +130,7 @@ final class SaveService: ObservableObject {
     // MARK: - 相册归类
 
     private func chooseAlbum(for note: ParsedNote) async throws -> PHAssetCollection? {
-        guard let author = note.author, !author.primaryID.isEmpty || !author.name.isEmpty else {
+        guard let author = note.author, !author.name.isEmpty || !author.ids.isEmpty else {
             say("拿不到作者信息，不做相册归类")
             return nil
         }

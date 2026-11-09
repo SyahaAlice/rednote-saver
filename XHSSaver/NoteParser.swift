@@ -91,7 +91,49 @@ enum NoteParser {
         for (k, v) in pageHeaders { req.setValue(v, forHTTPHeaderField: k) }
         let (data, _) = try await session.data(for: req)
         let html = String(decoding: data, as: UTF8.self)
-        return try parse(html: html, noteID: ref.id)
+        var note = try parse(html: html, noteID: ref.id)
+        // 小红书号（redId）不在笔记数据里，要去作者主页取；取不到就让用户在选相册时手动填
+        if var author = note.author, let uid = author.ids.last {
+            let token = userToken(html: html, noteID: ref.id)
+            if let red = try? await fetchRedId(userID: uid, token: token, session: session), !red.isEmpty {
+                author.primaryID = red
+                author.ids.insert(red, at: 0)
+                note.author = author
+            }
+        }
+        return note
+    }
+
+    /// 笔记数据里作者的 xsecToken（打开作者主页时带上）
+    static func userToken(html: String, noteID: String) -> String? {
+        guard let state = try? initialState(html),
+              let map = (state["note"] as? [String: Any])?["noteDetailMap"] as? [String: Any],
+              let note = (map[noteID] as? [String: Any])?["note"] as? [String: Any],
+              let user = note["user"] as? [String: Any] else { return nil }
+        return user["xsecToken"] as? String
+    }
+
+    /// 作者主页里的小红书号（游客也能看到）
+    static func fetchRedId(userID: String, token: String?, session: URLSession) async throws -> String? {
+        var c = URLComponents(string: "https://www.xiaohongshu.com/user/profile/\(userID)")!
+        if let token, !token.isEmpty {
+            c.queryItems = [URLQueryItem(name: "xsec_token", value: token),
+                            URLQueryItem(name: "xsec_source", value: "pc_note")]
+        }
+        var req = URLRequest(url: c.url!, timeoutInterval: 15)
+        for (k, v) in pageHeaders { req.setValue(v, forHTTPHeaderField: k) }
+        let (data, _) = try await session.data(for: req)
+        let html = String(decoding: data, as: UTF8.self)
+        if let state = try? initialState(html),
+           let page = (state["user"] as? [String: Any])?["userPageData"] as? [String: Any],
+           let red = (page["basicInfo"] as? [String: Any])?["redId"] as? String {
+            return red
+        }
+        // 兜底：直接在网页里找
+        if let r = html.range(of: #""redId":"([^"]+)""#, options: .regularExpression) {
+            return String(html[r].dropFirst("\"redId\":\"".count).dropLast())
+        }
+        return nil
     }
 
     /// 读出 window.__INITIAL_STATE__ 并转成 JSON（替换 undefined、new Set/Map）
@@ -170,7 +212,8 @@ enum NoteParser {
         }
         var author: Author?
         if let user = note["user"] as? [String: Any], let uid = user["userId"] as? String, !uid.isEmpty {
-            author = Author(name: user["nickname"] as? String ?? "", primaryID: uid, ids: [uid])
+            // primaryID 先留空：相册名要用小红书号（不是用户 ID），由 parse(url:) 去作者主页补上
+            author = Author(name: user["nickname"] as? String ?? "", primaryID: "", ids: [uid], idLabel: "小红书号")
         }
         let published = (note["time"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
         let title = (note["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? note["desc"] as? String ?? ""

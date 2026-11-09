@@ -110,7 +110,8 @@ enum Douyin {
             let uid = str("uid")
             let ids = [douyinNo, uid, str("sec_uid")].filter { !$0.isEmpty }
             if !ids.isEmpty {
-                author = Author(name: str("nickname"), primaryID: douyinNo.isEmpty ? uid : douyinNo, ids: ids)
+                author = Author(name: str("nickname"), primaryID: douyinNo.isEmpty ? uid : douyinNo, ids: ids,
+                                idLabel: "抖音号")
             }
         }
         let published = (d["create_time"] as? Double).map { Date(timeIntervalSince1970: $0) }
