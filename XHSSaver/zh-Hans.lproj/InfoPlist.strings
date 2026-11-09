@@ -1,5 +1,5 @@
 /* 主屏幕上显示的中文名。Info.plist 里的基础名称必须是英文，否则 AltServer 向 Apple 注册 App ID 时会报 “The name for this app is invalid” */
-"CFBundleDisplayName" = "小红书保存";
-"CFBundleName" = "小红书保存";
-"NSPhotoLibraryAddUsageDescription" = "把小红书笔记里的图片、视频和实况照片存进相册";
+"CFBundleDisplayName" = "多功能媒体下载器";
+"CFBundleName" = "多功能媒体下载器";
+"NSPhotoLibraryAddUsageDescription" = "把下载的图片、视频和实况照片存进相册";
 "NSPhotoLibraryUsageDescription" = "按作者查找你已有的相册，把保存的照片放进去（只读取相册名，不上传任何内容）";

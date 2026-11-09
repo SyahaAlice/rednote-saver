@@ -14,7 +14,7 @@ enum PhotoSaver {
     static func ensureAccess() async throws {
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         guard status == .authorized || status == .limited else {
-            throw XHSError("没有相册写入权限，请到「设置 → 隐私与安全性 → 照片 → 小红书保存」里允许添加照片")
+            throw XHSError("没有相册写入权限，请到「设置 → 隐私与安全性 → 照片 → 多功能媒体下载器」里允许添加照片")
         }
     }
 

@@ -32,6 +32,7 @@ def q(s):
 
 sources = sorted(f for f in os.listdir(SRC) if f.endswith((".swift", ".m")))
 headers = sorted(f for f in os.listdir(SRC) if f.endswith(".h"))
+has_assets = os.path.isdir(os.path.join(SRC, "Assets.xcassets"))
 lprojs = sorted(d[:-6] for d in os.listdir(SRC) if d.endswith(".lproj")
                 and os.path.exists(os.path.join(SRC, d, "InfoPlist.strings")))
 
@@ -77,6 +78,11 @@ for f in sources + headers:
     i = oid("A1")
     file_refs[f] = i
     add("PBXFileReference", i, f, {"isa": "PBXFileReference", "lastKnownFileType": t, "path": q(f), "sourceTree": '"<group>"'})
+assets_ref = oid("A1")
+if has_assets:
+    add("PBXFileReference", assets_ref, "Assets.xcassets",
+        {"isa": "PBXFileReference", "lastKnownFileType": "folder.assetcatalog", "path": "Assets.xcassets",
+         "sourceTree": '"<group>"'})
 info_ref = oid("A1")
 add("PBXFileReference", info_ref, "Info.plist",
     {"isa": "PBXFileReference", "lastKnownFileType": "text.plist.xml", "path": "Info.plist", "sourceTree": '"<group>"'})
@@ -116,6 +122,10 @@ if lproj_refs:
     res_build.append(ref(i, "InfoPlist.strings in Resources"))
     add("PBXBuildFile", i, "InfoPlist.strings in Resources",
         {"isa": "PBXBuildFile", "fileRef": ref(strings_group, "InfoPlist.strings")})
+if has_assets:
+    i = oid("B1")
+    res_build.append(ref(i, "Assets.xcassets in Resources"))
+    add("PBXBuildFile", i, "Assets.xcassets in Resources", {"isa": "PBXBuildFile", "fileRef": ref(assets_ref, "Assets.xcassets")})
 for d, fr in folder_refs.items():
     i = oid("B1")
     res_build.append(ref(i, f"{d} in Resources"))
@@ -131,6 +141,8 @@ add("PBXBuildFile", embed_py, "Python.xcframework in Embed Frameworks",
 # --- 分组 ---
 g_main, g_src, g_prod = oid("C1"), oid("C1"), oid("C1")
 src_children = [ref(file_refs[f], f) for f in sources + headers] + [ref(info_ref, "Info.plist")]
+if has_assets:
+    src_children.append(ref(assets_ref, "Assets.xcassets"))
 if lproj_refs:
     src_children.append(ref(strings_group, "InfoPlist.strings"))
 add("PBXGroup", g_main, "", {"isa": "PBXGroup", "children": [
@@ -188,11 +200,11 @@ proj_cfg = {
                 "SWIFT_OPTIMIZATION_LEVEL": '"-O"', "VALIDATE_PRODUCT": "YES"},
 }
 target_cfg = {
-    "CODE_SIGN_STYLE": "Automatic", "CURRENT_PROJECT_VERSION": "2", "MARKETING_VERSION": "1.1",
+    "CODE_SIGN_STYLE": "Automatic", "CURRENT_PROJECT_VERSION": "3", "MARKETING_VERSION": "1.2",
     "GENERATE_INFOPLIST_FILE": "YES", "INFOPLIST_FILE": f"{NAME}/Info.plist",
     # 基础名称必须是英文：AltServer 用它向 Apple 注册 App ID；中文名在 zh-Hans.lproj/InfoPlist.strings
-    "INFOPLIST_KEY_CFBundleDisplayName": NAME,
-    "INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription": q("Save note images, videos and Live Photos to your library"),
+    "INFOPLIST_KEY_CFBundleDisplayName": "MediaDownloader",
+    "INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription": q("Save downloaded images, videos and Live Photos to your library"),
     # 相册归类要读取已有相册名，需要「完整照片访问」；缺这一项时申请权限会被系统直接结束 App
     "INFOPLIST_KEY_NSPhotoLibraryUsageDescription": q("Find your existing albums by author to file saved items"),
     "INFOPLIST_KEY_UIApplicationSceneManifest_Generation": "YES",
@@ -203,6 +215,10 @@ target_cfg = {
     "SWIFT_OBJC_BRIDGING_HEADER": q(f"{NAME}/{NAME}-Bridging-Header.h"),
     "SWIFT_EMIT_LOC_STRINGS": "YES", "TARGETED_DEVICE_FAMILY": "1",
 }
+if has_assets:
+    # 图标与品牌色由 tools/make_icon.py 生成
+    target_cfg["ASSETCATALOG_COMPILER_APPICON_NAME"] = "AppIcon"
+    target_cfg["ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME"] = "AccentColor"
 for cid, name, cfg in [(c_pd, "Debug", proj_cfg["Debug"]), (c_pr, "Release", proj_cfg["Release"]),
                        (c_td, "Debug", target_cfg), (c_tr, "Release", target_cfg)]:
     add("XCBuildConfiguration", cid, name, {"isa": "XCBuildConfiguration", "buildSettings": cfg, "name": name})

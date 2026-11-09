@@ -50,7 +50,7 @@ enum YtDlp {
     /// 从 yt-dlp 官方 GitHub 下载最新版，替换 App 内置版本，不用重新安装 App
     static func updateToLatest() async throws -> Version {
         var req = URLRequest(url: latestURL, timeoutInterval: 120)
-        req.setValue("XHSSaver", forHTTPHeaderField: "User-Agent")
+        req.setValue("MediaDownloader", forHTTPHeaderField: "User-Agent")
         let (tmp, resp) = try await URLSession.shared.download(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw XHSError("下载 yt-dlp 失败") }
         let fm = FileManager.default

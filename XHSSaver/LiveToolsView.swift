@@ -67,18 +67,21 @@ private struct VideoToLiveSection: View {
                 Button {
                     Task { await make() }
                 } label: {
-                    HStack {
+                    HStack(spacing: 8) {
+                        if busy { ProgressView().tint(.white) } else { Image(systemName: "livephoto") }
                         Text(busy ? "正在生成…" : "生成实况照片并存进相册")
-                        if busy { Spacer(); ProgressView() }
                     }
                 }
+                .buttonStyle(PrimaryButtonStyle())
+                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                .listRowBackground(Color.clear)
                 .disabled(busy)
             }
             if !status.isEmpty {
                 Text(status).font(.callout)
             }
         } header: {
-            Text("视频转实况")
+            Label("视频转实况", systemImage: "film.stack")
         } footer: {
             Text("截取视频里最长 5 秒的一段做成实况照片，封面可以选片段里的任意一帧。")
         }
@@ -170,9 +173,9 @@ private struct LiveSplitSection: View {
                 Text(status).font(.callout)
             }
         } header: {
-            Text("实况拆分")
+            Label("实况拆分", systemImage: "square.split.2x1")
         } footer: {
-            Text("把实况照片拆成一张静态照片和一段视频，分别存进相册，并在「文件 → 小红书保存 → 实况拆分」里各留一份。")
+            Text("把实况照片拆成一张静态照片和一段视频，分别存进相册，并在「文件 → 多功能媒体下载器 → 实况拆分」里各留一份。")
         }
         .onChange(of: pickerItem) { item in
             guard let item else { return }

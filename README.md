@@ -1,4 +1,4 @@
-# 小红书保存（XHSSaver）
+# 多功能媒体下载器（MediaDownloader）
 
 一个完全由你自己掌控的 iOS App，替代已失效的「小红书助手pro」和 HyperTaps：
 
@@ -22,7 +22,7 @@
 | `XHSSaver/LivePhotoMaker.swift` | 写入实况配对标记（不重新编码视频） |
 | `XHSSaver/LiveTools.swift` | 视频转实况、实况拆分、音视频合并（代替 ffmpeg） |
 | `XHSSaver/SaveService.swift` | 保存流程、替代版本确认、进度显示 |
-| `XHSSaver/SaveNoteIntent.swift` | 快捷指令操作「保存小红书笔记」 |
+| `XHSSaver/SaveNoteIntent.swift` | 快捷指令操作「下载到相册」 |
 | `tools/gen_project.py` | 生成 Xcode 工程文件（增删源文件后运行一次） |
 | `tools/parse_proto.py` | 小红书解析逻辑的 Python 原型，可离线检查已保存的网页 |
 | `.github/workflows/build.yml` | 在 GitHub 的 macOS 机器上编译未签名 .ipa |
@@ -35,7 +35,7 @@
 | `XHSSaver/LivePhotoMaker.swift` | 写入实况配对标记（不重新编码视频） |
 | `XHSSaver/PhotoSaver.swift` | PhotoKit 入库（只申请「添加照片」权限） |
 | `XHSSaver/SaveService.swift` | 整个保存流程和进度显示 |
-| `XHSSaver/SaveNoteIntent.swift` | 快捷指令操作「保存小红书笔记」 |
+| `XHSSaver/SaveNoteIntent.swift` | 快捷指令操作「下载到相册」 |
 | `tools/parse_proto.py` | 解析逻辑的 Python 原型，可离线检查已保存的网页 |
 | `.github/workflows/build.yml` | 在 GitHub 的 macOS 机器上编译未签名 .ipa |
 
@@ -75,7 +75,7 @@ iOS App 只能在 macOS 上编译，所以借用 GitHub 提供的 macOS 机器�
 7. **设置 → 通用 → VPN 与设备管理**：点你的 Apple ID，选「信任」。
 8. 现在主屏幕上应该有 AltStore 了。
 
-### 安装小红书保存
+### 安装多功能媒体下载器
 
 9. 两种方式，任选一种：
    - **电脑上装**：点任务栏 AltServer 图标，按住 `Shift` 点 **Sideload .ipa…**（新版本直接点 **Sideload .ipa…**），选择你的 iPhone 和 `XHSSaver.ipa`。
@@ -116,11 +116,11 @@ iOS App 只能在 macOS 上编译，所以借用 GitHub 提供的 macOS 机器�
 
 ### 下载
 
-- **App 里**：复制分享文案或链接 → 打开「小红书保存」→ **粘贴** → **保存到相册**。
+- **App 里**：复制分享文案或链接 → 打开「多功能媒体下载器」→ **粘贴** → **保存到相册**。
 - **分享菜单一键保存**：
   1. 打开「快捷指令」，新建一个快捷指令。
   2. 点底部 **ⓘ（简介）**，打开 **在共享表单中显示**，接收类型勾选 **URL** 和 **文本**。
-  3. 添加操作 **保存小红书笔记**（来自「小红书保存」），参数设成「快捷指令输入」。
+  3. 添加操作 **下载到相册**（来自「多功能媒体下载器」），参数设成「快捷指令输入」。
   4. 在小红书、B 站等 App 里点分享，选这个快捷指令。
 - 保存时 App 会被打开到前台，进度显示在「下载」页。
 
@@ -129,14 +129,14 @@ iOS App 只能在 macOS 上编译，所以借用 GitHub 提供的 macOS 机器�
 | 小红书图文 | 每张图的原图（通常是 HEIC） |
 | 小红书实况图 | 实况照片；普通图存原图 |
 | 小红书视频 | 原视频 |
-| 其它网站 | yt-dlp 下载，优先 H.264 + AAC、最高 1080p；音视频分开的自动合并。相册不支持的格式存到「文件 → 小红书保存 → 下载」 |
+| 其它网站 | yt-dlp 下载，优先 H.264 + AAC、最高 1080p；音视频分开的自动合并。相册不支持的格式存到「文件 → 多功能媒体下载器 → 下载」 |
 
 **原图 / 原片拿不到时**会弹窗询问：改存这一项、本次全部改存替代版本，或跳过。实况合成失败时也会先问你是否只存静态图。
 
 ### 实况工具
 
 - **视频转实况**：从相册或「文件」选一段视频，拖动滑块选开始位置、时长（最长 5 秒）和封面帧，生成实况照片存进相册。
-- **实况拆分**：选一张实况照片，拆成一张照片 + 一段视频存进相册，并在「文件 → 小红书保存 → 实况拆分」里各留一份。
+- **实况拆分**：选一张实况照片，拆成一张照片 + 一段视频存进相册，并在「文件 → 多功能媒体下载器 → 实况拆分」里各留一份。
 
 ### 保存设置（设置 → 保存）
 
@@ -194,7 +194,7 @@ iOS App 只能在 macOS 上编译，所以借用 GitHub 提供的 macOS 机器�
 
 ### 号池（cookies）
 
-App 的文件夹会出现在「文件 → 我的 iPhone → 小红书保存」里，号池就在其中的 `cookies` 文件夹：
+App 的文件夹会出现在「文件 → 我的 iPhone → 多功能媒体下载器」里，号池就在其中的 `cookies` 文件夹：
 
 1. 电脑上照旧用 Get cookies.txt LOCALLY 导出，再用 `merge_cookies.py` 把同一账号的多个域名合并成一个 `.txt`。
 2. 把文件推到手机（Bundle ID 在 App 的「设置」页里能看到，AltStore 会在原 ID 后面加上你的团队 ID）：

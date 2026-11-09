@@ -36,7 +36,7 @@ struct SettingsView: View {
                         .disabled(historyCount == 0)
                     }
                 } header: {
-                    Text("保存")
+                    Label("保存", systemImage: "square.and.arrow.down")
                 } footer: {
                     Text("""
                     图片格式：HEIC 是小红书原图本身，体积最小；JPEG / PNG 由小红书服务器从原图转换，分辨率不变。
@@ -71,7 +71,7 @@ struct SettingsView: View {
                         .disabled(newPlatform.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 } header: {
-                    Text("相册命名：ID 前缀")
+                    Label("相册命名：ID 前缀", systemImage: "number")
                 } footer: {
                     Text("没列出来的平台自动用小写拼音首字母（西瓜视频 → xgsp_），英文名用小写全名。")
                 }
@@ -84,7 +84,7 @@ struct SettingsView: View {
                                     placeholder: Prefs.defaultMultiSeparator)
                     TemplatePreview()
                 } header: {
-                    Text("相册命名：模板")
+                    Label("相册命名：模板", systemImage: "textformat")
                 } footer: {
                     Text("可用的占位符：{用户名} {前缀} {ID}。留空就用默认模板。多账号格式 = 常规模板 + 分隔 + 常规模板。")
                 }
@@ -128,7 +128,7 @@ struct SettingsView: View {
                     }
                     Button("添加账号") { showAdd = true }
                 } header: {
-                    Text("账号（在 App 内登录）")
+                    Label("账号（在 App 内登录）", systemImage: "person.crop.circle.badge.checkmark")
                 } footer: {
                     Text("每个账号有独立的登录状态，登录后 cookie 会自动写进号池。cookie 失效时点「重新登录」。左滑可删除账号。")
                 }
@@ -155,12 +155,12 @@ struct SettingsView: View {
                     }
                     Button("重新读取") { accounts = CookiePool.summaries() }
                 } header: {
-                    Text("号池（cookies 文件夹，含电脑导入的文件）")
+                    Label("号池（cookies 文件夹，含电脑导入的文件）", systemImage: "tray.full")
                 } footer: {
                     Text("""
                     在电脑上用 merge_cookies.py 整理好 Netscape 格式的 .txt，推到 App 的 cookies 文件夹：
                     opendevice afc push --app \(bundleID) --documents 本地文件 /cookies/
-                    也可以在「文件 → 我的 iPhone → 小红书保存 → cookies」里直接放进去。只显示文件名和网站，不显示 cookie 内容。
+                    也可以在「文件 → 我的 iPhone → 多功能媒体下载器 → cookies」里直接放进去。只显示文件名和网站，不显示 cookie 内容。
                     """)
                     .textSelection(.enabled)
                 }
@@ -185,15 +185,17 @@ struct SettingsView: View {
                         .disabled(updating)
                     }
                 } header: {
-                    Text("下载器")
+                    Label("下载器", systemImage: "shippingbox")
                 } footer: {
                     Text("其它网站用内置的 yt-dlp 下载。网站改版导致下载失败时，先点「更新」，会从 yt-dlp 官方 GitHub 下载最新版。")
                 }
 
-                Section("关于") {
+                Section {
                     LabeledContent("Bundle ID", value: bundleID)
                         .textSelection(.enabled)
                     LabeledContent("版本", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")
+                } header: {
+                    Label("关于", systemImage: "info.circle")
                 }
             }
             .navigationTitle("设置")

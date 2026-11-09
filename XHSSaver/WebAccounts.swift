@@ -104,7 +104,7 @@ final class WebAccounts: ObservableObject {
             let d = CookiePool.site(of: c.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")))
             return d == account.site || d.hasSuffix("." + account.site) || account.site.hasSuffix("." + d)
         }
-        var lines = ["# Netscape HTTP Cookie File", "# 由小红书保存 App 从内置浏览器导出：\(account.name)", ""]
+        var lines = ["# Netscape HTTP Cookie File", "# 由多功能媒体下载器从内置浏览器导出：\(account.name)", ""]
         for c in mine {
             let domain = c.domain
             let sub = domain.hasPrefix(".") ? "TRUE" : "FALSE"

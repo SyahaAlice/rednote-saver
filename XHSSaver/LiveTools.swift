@@ -60,7 +60,7 @@ enum LiveTools {
     }
 
     /// 实况拆分：把一张实况照片拆成静态照片 + 视频，各自存进相册，
-    /// 同时在「文件 → 小红书保存 → 实况拆分」里留一份
+    /// 同时在「文件 → 多功能媒体下载器 → 实况拆分」里留一份
     static func split(_ live: PHLivePhoto) async throws -> (photo: String, video: String) {
         try await PhotoSaver.ensureAccess()
         let resources = PHAssetResource.assetResources(for: live)

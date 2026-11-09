@@ -329,7 +329,7 @@ final class SaveService: ObservableObject {
             let safe = title.replacingOccurrences(of: "/", with: "_").prefix(60)
             let dst = out.appendingPathComponent("\(DateFormatter.fileStamp.string(from: Date()))_\(safe).\(file.pathExtension)")
             try FileManager.default.copyItem(at: file, to: dst)
-            say("相册没有接收（\(error.localizedDescription)），已存到「文件 → 小红书保存 → 下载」：\(dst.lastPathComponent)")
+            say("相册没有接收（\(error.localizedDescription)），已存到「文件 → 多功能媒体下载器 → 下载」：\(dst.lastPathComponent)")
         }
     }
 }
