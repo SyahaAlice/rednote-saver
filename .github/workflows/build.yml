@@ -29,6 +29,11 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             build 2>&1 | tee build.log | grep -E "error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)" || true
+          # 把编译错误转成 GitHub 注释，在运行页面上直接能看到
+          grep -E "^/.+:[0-9]+:[0-9]+: error: " build.log | sort -u | head -20 | \
+            sed -E "s#^$PWD/##; s#^([^:]+):([0-9]+):([0-9]+): error: (.*)#::error file=\1,line=\2,col=\3::\4#" || true
+          grep -E "error:" build.log | grep -vE "^/.+:[0-9]+:[0-9]+: error: " | sort -u | head -10 | \
+            sed -E "s#^#::error::#" || true
           test -d build/Release-iphoneos/XHSSaver.app
 
       - name: Package IPA
