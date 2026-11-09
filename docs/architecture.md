@@ -25,7 +25,8 @@
                                             ▼
                               ParsedNote（所有网站统一的结果）
                                             ▼
-        SaveService：查重 ─▶ 选相册 ─▶（yt-dlp 的作品在这里才下载）─▶ 逐项下载 / 实况合成 ─▶ 存进相册 ─▶ 记下载记录
+        SaveService：预览（勾选要保存的项）─▶ 查重 ─▶ 选相册 ─▶（yt-dlp 的作品在这里才下载）
+                     ─▶ 逐项下载 / 实况合成 ─▶ 存进相册 ─▶ 记下载记录
 ```
 
 | 文件 | 作用 |
@@ -37,6 +38,7 @@
 | `Instagram.swift`、`XPost.swift`、`Weibo.swift` | 各自的「怎么认出要的那份数据」和「怎么解析」 |
 | `YtDlp.swift`、`app/dlcore.py`、`PythonBridge.m` | 内嵌 Python 上的 yt-dlp |
 | `SaveService.swift` | 整个保存流程、所有提问、取消 |
+| `PreviewView.swift` | 预览页：下载之前列出作品里的每一项，勾选后才下载 |
 | `Downloader.swift` | 下载单个文件，按文件头决定扩展名 |
 | `LivePhotoMaker.swift`、`LiveTools.swift` | 实况照片配对、视频转实况、实况拆分、音视频合并 |
 | `PhotoSaver.swift` | PhotoKit 入库、相册匹配和命名 |
@@ -121,7 +123,9 @@ idle ──save(text:)──▶ parsing ──▶ downloading ──▶ saving(i
 
 ### 2. 等用户回答（隐式）
 
-`SaveService` 里五个可空变量各对应一种界面：`prompt`（弹窗）、`albumRequest`（选相册）、`loginAccount`（登录页）、`capture`（抖音浏览器）、`webCapture`（通用浏览器）；前三个各配一个 continuation。
+`SaveService` 里五个可空变量各对应一种界面：`prompt`（弹窗）、`previewRequest`（预览）、`albumRequest`（选相册）、`capture`（抖音浏览器）、`webCapture`（通用浏览器）；前三个各配一个 continuation。
+
+登录页不在这里：登录和 cookie 相关的界面都在设置页。保存失败需要登录时，流程**结束**（不等待），同时设置 `loginRequest` 和 `selectedTab`，由 `SettingsView.openRequestedLogin` 打开登录页；用户登录后自己再保存一次。
 
 规则：
 - 同一时间最多一个不为空（流程是串行的，没有类型保证）。
@@ -138,7 +142,7 @@ idle ──save(text:)──▶ parsing ──▶ downloading ──▶ saving(i
 
 | 状态 | 特征 |
 |---|---|
-| 占位（yt-dlp 还没下载） | `original`、`fallback` 为空，`localFile`、`error` 为空 |
+| 占位（yt-dlp 还没下载） | `original`、`fallback` 为空，`localFile`、`error` 为空（`preview` 可能有封面） |
 | 待下载 | `original` 或 `fallback` 有地址 |
 | 已在本地 | `localFile` 有值 |
 | 已失败 | `error` 有值（保存时直接算失败） |
@@ -148,6 +152,8 @@ idle ──save(text:)──▶ parsing ──▶ downloading ──▶ saving(i
 ### 5. 先解析后下载（隐式，跨 Swift 和 Python）
 
 `ParsedNote.fetch` 不为空 = 还没下载。Python 那边对应模块级变量 `dlcore._PENDING`：`probe` 写入，`fetch` 取走并清空。
+
+`fetch` 的参数是预览页选中的下标（`items` 里的位置）：不为空时只下载选中的，而且不再问「超过 20 项要不要全部保存」；为空表示没有经过预览。不用 `fetch` 的作品（地址已经在 `items` 里）由 `SaveService` 直接筛掉没选的项。
 
 规则：`probe` 和 `fetch` 必须成对、按顺序、同一时间只有一组（Python 调用都排在 `YtDlp.queue` 这一个串行队列上，加上 `isRunning` 保证了这一点）。`fetch` 之后不能再 `fetch`，要换清晰度就重新 `probe`。
 
@@ -184,6 +190,8 @@ Swift 的任务取消标志、工作目录里的 `cancel` 空文件（给 Python
 `history.json` 里有这个作品的键 = 保存过。只在「存了东西而且没有失败项」时写入；用户主动跳过的项不算失败。
 
 ### 13. 日志文字当作事件（隐式，脆弱）
+
+进度分三份：`log` 是关键节点（下载页默认显示），`details` 是完整过程（点开才显示），`latest` 是最新的一行（保存时显示在进度下面）。`say(_:detail:)` 的 `detail: true` 表示这一行只是细节。新加的进度默认算细节，只有「解析到了什么、存了什么、哪里失败」才算关键节点。
 
 `SaveService.log` 是纯文字，界面靠开头判断样式（`✅`、`❌`、`⚠️`、`失败`、`下载中`，见 `ContentView.LogRow`）；补登提示靠在错误说明里找「登录」「403」等字样（`looksLikeAuth`）。
 

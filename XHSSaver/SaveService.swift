@@ -77,27 +77,40 @@ final class SaveService: ObservableObject {
 
     @Published private(set) var isRunning = false
     @Published private(set) var phase = SavePhase.idle
+    /// 进度里的关键节点（下载页默认只显示这些）
     @Published private(set) var log: [String] = []
+    /// 完整过程：关键节点 + 细节（用哪个账号、yt-dlp 的输出、每一项的下载…），下载页里点开才显示
+    @Published private(set) var details: [String] = []
+    /// 最新的一行（不管是不是关键节点），保存过程中显示在进度下面，表示「现在在干什么」
+    @Published private(set) var latest = ""
     @Published var prompt: ChoicePrompt?
     @Published var albumRequest: AlbumRequest?
+    /// 预览：解析完、下载之前，让用户看一眼有什么、勾选要保存的项
+    @Published var previewRequest: PreviewRequest?
+    /// 当前在哪一页（0 下载、1 实况工具、2 设置）
+    @Published var selectedTab = 0
+    static let settingsTab = 2
+    /// 请设置页打开这个网址所属网站的登录页（登录、cookie 相关的界面都在设置里）
+    @Published var loginRequest: URL?
     /// 抖音读取作品时弹出的内置浏览器
     @Published var capture: DouyinCapture?
     /// Instagram、X、微博读取帖子时弹出的内置浏览器（通用，见 WebCapture.swift）
     @Published var webCapture: WebCapture?
-    /// 补登：弹出某个账号的内置浏览器登录页
-    @Published var loginAccount: WebAccount?
-    private var loginContinuation: CheckedContinuation<Void, Never>?
 
     private var promptContinuation: CheckedContinuation<Int?, Never>?
     private var albumContinuation: CheckedContinuation<AlbumDecision, Never>?
+    private var previewContinuation: CheckedContinuation<Set<Int>?, Never>?
     private var useFallbackForAll = false
     /// 正在跑的保存任务，「取消」时用
     private var current: Task<String, Error>?
     private var referer = ""
     private var target = SaveTarget()
 
-    func say(_ line: String) {
-        log.append(line)
+    /// 记一行进度。detail = true 的是细节，只进完整过程，不出现在关键节点里
+    func say(_ line: String, detail: Bool = false) {
+        details.append(line)
+        latest = line
+        if !detail { log.append(line) }
     }
 
     // MARK: - 提问
@@ -132,29 +145,24 @@ final class SaveService: ObservableObject {
         albumContinuation = nil
     }
 
-    /// 弹出内置浏览器让用户登录（补登），关掉后 cookie 已写进号池
-    func runLogin(_ account: WebAccount) async {
-        await waiting {
-            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-                loginContinuation = c
-                loginAccount = account
+    /// 弹出预览页，等用户勾选。返回选中的项（note.items 的下标）；nil = 用户点了取消
+    private func choosePreview(_ note: ParsedNote) async -> Set<Int>? {
+        if Task.isCancelled { return nil }
+        let request = PreviewRequest(platform: note.platform, title: note.title, author: note.author,
+                                     items: note.items, referer: note.referer,
+                                     savedBefore: History.savedDate(note.historyKey))
+        return await waiting {
+            await withCheckedContinuation { (c: CheckedContinuation<Set<Int>?, Never>) in
+                previewContinuation = c
+                previewRequest = request
             }
         }
     }
 
-    func loginFinished() {
-        loginAccount = nil
-        loginContinuation?.resume()
-        loginContinuation = nil
-    }
-
-    /// 下载页的「补登」按钮：登录输入框里那个链接所属的网站
-    func quickLogin(text: String) async {
-        guard let url = NoteParser.extractURL(text) else { return }
-        let account = WebAccounts.shared.accountForLogin(url: url)
-        await runLogin(account)
-        let n = await WebAccounts.shared.exportCookies(account)
-        say("已更新「\(account.name)」的 cookie（\(n) 条）")
+    func decidePreview(_ selection: Set<Int>?) {
+        previewRequest = nil
+        previewContinuation?.resume(returning: selection)
+        previewContinuation = nil
     }
 
     /// 这次失败是不是需要登录 / cookie 失效。
@@ -193,6 +201,8 @@ final class SaveService: ObservableObject {
         isRunning = true
         phase = .parsing
         log = []
+        details = []
+        latest = ""
         useFallbackForAll = false
         let task = Task { @MainActor in try await self.run(text: text) }
         current = task
@@ -218,7 +228,7 @@ final class SaveService: ObservableObject {
         }
         if prompt != nil { answer(nil) }
         if albumRequest != nil { decideAlbum(.none) }
-        if loginAccount != nil { loginFinished() }
+        if previewRequest != nil { decidePreview(nil) }
         capture?.cancel()
         webCapture?.cancel()
     }
@@ -237,25 +247,22 @@ final class SaveService: ObservableObject {
                 summary = try await attempt(url)
             } catch {
                 try checkCancelled()
-                // 失败时可以直接在内置浏览器里补登这个网站，登录后自动重试一次
+                // 登录、cookie 相关的界面都在「设置 → 账号」里：这里只问要不要过去，不在下载页弹登录页
                 let site = CookiePool.site(of: url.host ?? "")
-                say("失败：" + error.localizedDescription)
-                // 只有「看起来是登录问题」或「这个网站的号池账号已失效 / 未激活」时才提示补登；
+                // 只有「看起来是登录问题」或「这个网站的号池账号已失效 / 未激活」时才提示去登录；
                 // 地区限制、作品被删之类的失败直接报错
                 let auth = looksLikeAuth(error)
                 let badPool = CookiePool.hasProblem(for: url)
                 guard auth || badPool else { throw error }
+                say("失败：" + error.localizedDescription)
                 let reason = badPool ? "号池里\(site)的 cookie 已失效或未激活。" : "看起来需要登录。"
-                guard await ask("\(site) 没有保存成功", reason + "要用内置浏览器登录（补登）后重试吗？",
-                                options: ["登录后重试"], cancel: "不用了") != nil else { throw error }
+                guard await ask("\(site) 没有保存成功",
+                                reason + "登录在「设置 → 账号」里进行。现在过去登录吗？登录后回到「下载」再保存一次。",
+                                options: ["去设置登录"], cancel: "不用了") != nil else { throw error }
                 try checkCancelled()
-                let account = WebAccounts.shared.accountForLogin(url: url)
-                await runLogin(account)
-                try checkCancelled()
-                let n = await WebAccounts.shared.exportCookies(account)  // 等 cookie 写进号池再重试
-                say("已更新「\(account.name)」的 cookie（\(n) 条），重试…")
-                phase = .parsing
-                summary = try await attempt(url)
+                loginRequest = url
+                selectedTab = Self.settingsTab
+                throw XHSError("需要登录 \(site)：已打开「设置 → 账号」，登录后回到这里再保存一次", kind: .needsLogin)
             }
             phase = .finished
             say("✅ " + summary)
@@ -283,8 +290,24 @@ final class SaveService: ObservableObject {
         say("\(note.platform)：\(title)（\(note.items.count) 项）")
         if let a = note.author { say("作者：\(a.name)（\(a.primaryID)）") }
 
-        // 下载记录：保存过的先问一句
-        if let last = History.savedDate(note.historyKey) {
+        // 预览：下载之前先让用户看一眼、勾选要保存的项。selection 是选中的下标
+        var selection: Set<Int>?
+        if Prefs.previewBeforeSave {
+            guard let chosen = await choosePreview(note) else {
+                cancel()  // 在预览页点了取消 = 取消这次保存
+                throw XHSError.cancelled
+            }
+            try checkCancelled()
+            selection = chosen
+            if chosen.count < note.items.count { say("选了 \(chosen.count) / \(note.items.count) 项") }
+            // 还没下载的作品（yt-dlp）把选择交给 fetch，只下载选中的；其它的直接筛掉没选的
+            if note.fetch == nil {
+                note.items = note.items.enumerated().filter { chosen.contains($0.offset) }.map { $0.element }
+            }
+        }
+
+        // 下载记录：保存过的先问一句（预览页里已经提示过，并且用户点了「再保存一次」，就不再问）
+        if selection == nil, let last = History.savedDate(note.historyKey) {
             let when = last.formatted(date: .abbreviated, time: .shortened)
             if await ask("这个作品已经保存过", "上次保存于 \(when)。要再保存一次吗？",
                          options: ["再保存一次"], cancel: "不用了") == nil {
@@ -296,7 +319,7 @@ final class SaveService: ObservableObject {
         target = SaveTarget()
         if Prefs.usePublishDate, let p = note.published {
             target.creationDate = p
-            say("照片日期设为发布时间：\(p.formatted(date: .abbreviated, time: .shortened))")
+            say("照片日期设为发布时间：\(p.formatted(date: .abbreviated, time: .shortened))", detail: true)
         }
         if Prefs.askAlbum {
             target.album = try await chooseAlbum(for: note)
@@ -306,7 +329,7 @@ final class SaveService: ObservableObject {
         // yt-dlp 的作品到这里才真正下载（查重、选相册都在下载之前）
         if let fetch = note.fetch {
             phase = .downloading
-            note.items = try await fetch()
+            note.items = try await fetch(selection)
             note.fetch = nil
             try checkCancelled()
         }
@@ -367,7 +390,7 @@ final class SaveService: ObservableObject {
             do {
                 switch item.kind {
                 case .video:
-                    say("第 \(n) 项：\(item.localFile == nil ? "下载视频…" : "保存视频…")")
+                    say("第 \(n) 项：\(item.localFile == nil ? "下载视频…" : "保存视频…")", detail: true)
                     if let file = try await fileFor(item, dir: dir, name: n, what: "原片") {
                         try await saveVideoOrKeepFile(file, title: note.title.isEmpty ? note.id : note.title,
                                                       platform: note.platform)
@@ -376,7 +399,7 @@ final class SaveService: ObservableObject {
                         skipped += 1
                     }
                 case .image:
-                    say("第 \(n) 项：\(item.localFile == nil ? "下载图片…" : "保存图片…")")
+                    say("第 \(n) 项：\(item.localFile == nil ? "下载图片…" : "保存图片…")", detail: true)
                     if let file = try await fileFor(item, dir: dir, name: n, what: "原图") {
                         try await PhotoSaver.saveImage(file, target: target)
                         images += 1
@@ -384,7 +407,7 @@ final class SaveService: ObservableObject {
                         skipped += 1
                     }
                 case .live:
-                    say("第 \(n) 项：下载实况图…")
+                    say("第 \(n) 项：下载实况图…", detail: true)
                     switch try await saveLive(item, dir: dir, name: n) {
                     case .live: lives += 1
                     case .still: images += 1

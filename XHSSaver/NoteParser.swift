@@ -184,7 +184,10 @@ enum NoteParser {
                 for b in s["backupUrls"] as? [String] ?? [] { if let u = https(b) { fallback.append(u) } }
             }
             if original.isEmpty && fallback.isEmpty { throw XHSError("没找到视频地址") }
-            items.append(NoteMedia(kind: .video, original: original, fallback: fallback))
+            var item = NoteMedia(kind: .video, original: original, fallback: fallback)
+            // 预览用视频封面（笔记的第一张图）
+            item.preview = https((note["imageList"] as? [[String: Any]])?.first?["urlDefault"] as? String)
+            items.append(item)
         } else {
             let format = Prefs.imageFormat
             for img in note["imageList"] as? [[String: Any]] ?? [] {
@@ -200,6 +203,7 @@ enum NoteParser {
                 case .png: (original, fallback) = ([png].compactMap { $0 }, [jpeg, web].compactMap { $0 })
                 }
                 var item = NoteMedia(kind: .image, original: original, fallback: fallback)
+                item.preview = web  // 预览用网页压缩图，不用下载原图
                 if img["livePhoto"] as? Bool == true,
                    let h = ((img["stream"] as? [String: Any])?["h264"] as? [[String: Any]])?.first,
                    let master = https(h["masterUrl"] as? String) {

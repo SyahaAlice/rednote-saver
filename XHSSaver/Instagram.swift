@@ -72,14 +72,18 @@ enum Instagram {
 
     /// 一张图或一段视频 → 一个媒体项；首选最高分辨率，次一档要先问用户
     private static func media(_ m: [String: Any]) -> NoteMedia? {
-        // 新写法
+        // 新写法。视频也带 image_versions2（封面），最小的那张拿来做预览
         let videos = sortedURLs(m["video_versions"])
-        if let best = videos.first {
-            return NoteMedia(kind: .video, original: [best], fallback: Array(videos.dropFirst().prefix(2)))
-        }
         let images = sortedURLs((m["image_versions2"] as? [String: Any])?["candidates"])
+        if let best = videos.first {
+            var item = NoteMedia(kind: .video, original: [best], fallback: Array(videos.dropFirst().prefix(2)))
+            item.preview = images.last
+            return item
+        }
         if let best = images.first {
-            return NoteMedia(kind: .image, original: [best], fallback: Array(images.dropFirst().prefix(1)))
+            var item = NoteMedia(kind: .image, original: [best], fallback: Array(images.dropFirst().prefix(1)))
+            item.preview = images.last
+            return item
         }
         // 旧写法
         if let video = url(m["video_url"]) {

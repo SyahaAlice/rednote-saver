@@ -176,12 +176,14 @@ enum YtDlp {
     }
 
     /// 第二步：下载 probe 解析好的内容（dir 要和 probe 时相同），链接里的每一项都下载；
-    /// limit 不为 nil 时只下载前几项。返回的数组和链接里的项一一对应，失败的项带 error
-    static func fetch(into dir: URL, limit: Int? = nil,
+    /// limit 不为 nil 时只下载前几项；only 不为 nil 时只下载这几项（从 1 数起，预览页勾选的）。
+    /// 返回的数组和实际下载的项一一对应，失败的项带 error
+    static func fetch(into dir: URL, limit: Int? = nil, only: [Int]? = nil,
                       onLog: @escaping @MainActor (String) -> Void) async throws -> [Fetched] {
         let log = dir.appendingPathComponent("fetch-\(UUID().uuidString.prefix(8)).log")
         var args: [String: Any] = ["log": log.path, "cancel": cancelFlag(in: dir).path]
         if let limit { args["limit"] = limit }
+        if let only { args["only"] = only }
         let o = try await logged("fetch", args, dir: dir, log: log, onLog: onLog)
         let items = (o["items"] as? [[String: Any]] ?? []).map { item -> Fetched in
             let streams = (item["streams"] as? [[String: Any]] ?? []).compactMap { s -> Stream? in

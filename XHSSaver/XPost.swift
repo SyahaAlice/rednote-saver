@@ -42,11 +42,15 @@ enum XPost {
                 .sorted { ($0["bitrate"] as? Int ?? 0) > ($1["bitrate"] as? Int ?? 0) }
                 .compactMap { JSONTree.url($0["url"]) }
             guard let best = variants.first else { return nil }
-            return NoteMedia(kind: .video, original: [best], fallback: Array(variants.dropFirst().prefix(2)))
+            var item = NoteMedia(kind: .video, original: [best], fallback: Array(variants.dropFirst().prefix(2)))
+            item.preview = JSONTree.url(m["media_url_https"])  // 视频的封面
+            return item
         }
         guard let s = m["media_url_https"] as? String, let plain = URL(string: s) else { return nil }
         if let orig = originalImage(s) {
-            return NoteMedia(kind: .image, original: [orig], fallback: [plain])
+            var item = NoteMedia(kind: .image, original: [orig], fallback: [plain])
+            item.preview = URL(string: s + "?name=small")
+            return item
         }
         return NoteMedia(kind: .image, original: [plain], fallback: [])
     }

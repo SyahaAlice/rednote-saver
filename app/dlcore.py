@@ -281,7 +281,7 @@ def probe(args_json):
 
 def fetch(args_json):
     """第二步：下载 probe 解析好的内容，链接里的每一项都下载。
-    参数：log, cancel, limit（只下载前几项；不传就是全部）
+    参数：log, cancel, limit（只下载前几项；不传就是全部）, only（只下载这几项，从 1 数起；预览页勾选的）
     返回：{"ok": true, "items": [{"streams": [{"path", "vcodec", "acodec", "ext"}]} 或 {"error": "..."}, ...]}
     每一项放在各自的子文件夹里。某一项失败不影响其它项，失败的那一项带 error。
     用解析成功的那个账号下载；一项都没成功就按顺序换后面的账号，重新解析再下载"""
@@ -294,6 +294,7 @@ def fetch(args_json):
     log = _Log(b.get("log") or a.get("log"))
     cancel = _Cancel(b.get("cancel") or a.get("cancel"))
     limit = b.get("limit")
+    only = b.get("only")
     try:
         cookies = p["cookies"]
         items = p["items"]
@@ -309,13 +310,18 @@ def fetch(args_json):
                     last_err = e
                     log.write(f"失败：{e}")
                     continue
-            todo = items[:limit] if limit else items
+            todo = list(enumerate(items, 1))
+            if only is not None:
+                wanted = {int(x) for x in only}
+                todo = [(n, it) for n, it in todo if n in wanted]
+            elif limit:
+                todo = todo[:limit]
             out = []
-            for n, (raw, chosen) in enumerate(todo, 1):
+            for k, (n, (raw, chosen)) in enumerate(todo, 1):
                 if cancel.hit():
                     return _cancelled()
                 if len(todo) > 1:
-                    log.write(f"第 {n} / {len(todo)} 项")
+                    log.write(f"第 {k} / {len(todo)} 项")
                 sub = os.path.join(a["out_dir"], f"{n:03d}")
                 os.makedirs(sub, exist_ok=True)
                 try:

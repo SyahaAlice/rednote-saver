@@ -34,6 +34,8 @@ struct NoteMedia {
     var liveVideoURLs: [URL] = []
     /// 已经下载好的本地文件（yt-dlp 下载的内容走这里，不再联网）
     var localFile: URL?
+    /// 预览用的小图 / 视频封面地址（没有就用原图；视频没有就只显示图标）
+    var preview: URL?
     /// 这一项在解析 / 下载阶段就已经失败（yt-dlp 多项帖子里的某一项）：保存时直接算作失败并显示这句说明
     var error: String?
 }
@@ -62,8 +64,9 @@ struct ParsedNote {
     /// 解析器自己建的临时目录（yt-dlp 下载的文件在这里），保存完删除
     var workDir: URL?
     /// 还没下载的作品（yt-dlp）：解析时只拿到标题、作者等信息，
-    /// 查重和选相册之后才调用它真正下载，返回的媒体项替换 items
-    var fetch: (@MainActor () async throws -> [NoteMedia])?
+    /// 预览、查重和选相册之后才调用它真正下载，返回的媒体项替换 items。
+    /// 参数是用户在预览页选中的项（items 的下标）；nil = 没有经过预览，按全部处理
+    var fetch: (@MainActor (Set<Int>?) async throws -> [NoteMedia])?
 
     var historyKey: String { "\(platform):\(id)" }
 }
@@ -139,6 +142,12 @@ enum Prefs {
         ImageFormat(rawValue: UserDefaults.standard.string(forKey: imageFormatKey) ?? "") ?? .heic
     }
     static var usePublishDate: Bool { UserDefaults.standard.bool(forKey: usePublishDateKey) }
+
+    /// 保存前预览（解析完先看一眼、勾选要保存的项）；默认开启
+    static let previewBeforeSaveKey = "previewBeforeSave"
+    static var previewBeforeSave: Bool {
+        UserDefaults.standard.object(forKey: previewBeforeSaveKey) as? Bool ?? true
+    }
 
     /// B 站视频的封面怎么处理
     enum BiliCover: String, CaseIterable, Identifiable {

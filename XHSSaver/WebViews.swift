@@ -66,9 +66,11 @@ struct WebLoginView: View {
             Task { await WebAccounts.shared.exportCookies(account) }
         }
         .onAppear {
-            // 抖音用桌面版网页（手机版页面拿不到作品数据）
-            let web = makeWebView(for: account, desktop: account.site == "douyin.com")
-            if let url = URL(string: account.loginURL) { web.load(URLRequest(url: url)) }
+            // 常用网站按预设来：登录页地址和要不要请求桌面网站都以预设为准
+            // （这样改了预设之后，以前建好的账号也会用上新的登录页）
+            let preset = SitePreset.preset(for: account.site)
+            let web = makeWebView(for: account, desktop: preset?.desktop ?? false)
+            if let url = URL(string: preset?.loginURL ?? account.loginURL) { web.load(URLRequest(url: url)) }
             webView = web
         }
     }

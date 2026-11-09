@@ -5,13 +5,16 @@ struct ContentView: View {
     @ObservedObject private var service = SaveService.shared
 
     var body: some View {
-        TabView {
+        TabView(selection: $service.selectedTab) {
             DownloadView()
                 .tabItem { Label("下载", systemImage: "arrow.down.circle") }
+                .tag(0)
             LiveToolsView()
                 .tabItem { Label("实况工具", systemImage: "livephoto") }
+                .tag(1)
             SettingsView()
                 .tabItem { Label("设置", systemImage: "gearshape") }
+                .tag(SaveService.settingsTab)
         }
         .alert(service.prompt?.title ?? "", isPresented: Binding(
             get: { service.prompt != nil },
@@ -33,8 +36,8 @@ struct ContentView: View {
         .sheet(item: $service.webCapture) { cap in
             WebCaptureView(capture: cap)
         }
-        .sheet(item: $service.loginAccount, onDismiss: { service.loginFinished() }) { a in
-            WebLoginView(account: a)
+        .sheet(item: $service.previewRequest) { req in
+            PreviewView(request: req)
         }
         .onAppear { CookiePool.prepareFolder() }
     }
@@ -43,9 +46,8 @@ struct ContentView: View {
 struct DownloadView: View {
     @ObservedObject private var service = SaveService.shared
     @State private var text = ""
+    @State private var showDetails = false
     @FocusState private var editing: Bool
-
-    private var hasURL: Bool { NoteParser.extractURL(text) != nil }
 
     var body: some View {
         NavigationStack {
@@ -92,7 +94,7 @@ struct DownloadView: View {
         .padding(.top, 12)
     }
 
-    // 输入框 + 粘贴 / 补登 / 清空
+    // 输入框 + 粘贴 / 清空（登录、cookie 相关的都在「设置 → 账号」）
     private var inputCard: some View {
         Card {
             ZStack(alignment: .topLeading) {
@@ -115,14 +117,6 @@ struct DownloadView: View {
                 .buttonBorderShape(.capsule)
                 .labelStyle(.titleAndIcon)
                 .tint(.accentColor)
-                Button {
-                    let input = text
-                    Task { await service.quickLogin(text: input) }
-                } label: {
-                    Label("补登", systemImage: "person.badge.key")
-                }
-                .buttonStyle(ChipButtonStyle())
-                .disabled(!hasURL || service.isRunning)
                 Spacer()
                 Button {
                     text = ""
@@ -186,11 +180,40 @@ struct DownloadView: View {
                 ProgressView(value: Double(index - 1), total: Double(total))
                     .tint(Theme.violet)
             }
-            let lines = Array(service.log.suffix(60))
+            // 只列关键节点；细节（用哪个账号、下载百分比、每一项…）收在下面，点开才看
+            let lines = Array(service.log.suffix(30))
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
                     LogRow(line: line, latest: i == lines.count - 1)
                 }
+            }
+            if service.isRunning, !service.latest.isEmpty, service.latest != service.log.last {
+                // 现在在干什么：只占一行，不断被最新的一条替换
+                Text(service.latest)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityIdentifier("latest")
+            }
+            if service.details.count > service.log.count {
+                DisclosureGroup(isExpanded: $showDetails) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(Array(service.details.suffix(200).enumerated()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Text("完整过程（\(service.details.count) 行）")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("details")
             }
         }
     }
@@ -208,7 +231,7 @@ struct DownloadView: View {
                     FeatureTag(icon: "globe", text: "yt-dlp 千余网站")
                 }
             }
-            Text("原图拿不到时会先问你再改存替代版本；失败时可以直接在内置浏览器补登。也可以在快捷指令里用「下载到相册」，配合分享菜单一键保存。")
+            Text("解析完会先给你预览，勾选后才下载；原图拿不到时会先问你再改存替代版本。登录和账号在「设置 → 账号」。也可以在快捷指令里用「下载到相册」，配合分享菜单一键保存。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

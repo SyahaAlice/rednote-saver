@@ -23,15 +23,23 @@ struct SitePreset: Identifiable {
     var title: String
     var site: String
     var loginURL: String
+    /// 登录页要不要请求桌面网站（有的网站手机版网页不能登录，或者会被带去「打开 App」的页面）
+    var desktop = false
+
+    static func preset(for site: String) -> SitePreset? { all.first { $0.site == site } }
 
     static let all: [SitePreset] = [
-        SitePreset(title: "抖音", site: "douyin.com", loginURL: "https://www.douyin.com/"),
+        SitePreset(title: "抖音", site: "douyin.com", loginURL: "https://www.douyin.com/", desktop: true),
         SitePreset(title: "小红书", site: "xiaohongshu.com", loginURL: "https://www.xiaohongshu.com/explore"),
         SitePreset(title: "哔哩哔哩", site: "bilibili.com", loginURL: "https://passport.bilibili.com/login"),
         SitePreset(title: "微博", site: "weibo.com", loginURL: "https://weibo.com/login.php"),
         SitePreset(title: "Instagram", site: "instagram.com", loginURL: "https://www.instagram.com/accounts/login/"),
         SitePreset(title: "X", site: "x.com", loginURL: "https://x.com/i/flow/login"),
-        SitePreset(title: "快手", site: "kuaishou.com", loginURL: "https://www.kuaishou.com/"),
+        // 快手：www.kuaishou.com 用手机浏览器打开会被带去 m.kuaishou.com（只有「打开 App」，不能登录），
+        // 所以用它的登录页本身，并请求桌面网站
+        SitePreset(title: "快手", site: "kuaishou.com", loginURL:
+            "https://passport.kuaishou.com/pc/account/login/?sid=kuaishou.server.web&callback=https%3A%2F%2Fwww.kuaishou.com%2F",
+                   desktop: true),
     ]
 }
 

@@ -94,7 +94,10 @@ enum Douyin {
             let tiers = videoTiers(v)
             guard let best = tiers.first else { throw XHSError("没找到视频地址") }
             // 最高清晰度失败时，次一档要先问用户
-            items.append(NoteMedia(kind: .video, original: best, fallback: Array(tiers.dropFirst().prefix(2).joined())))
+            var item = NoteMedia(kind: .video, original: best, fallback: Array(tiers.dropFirst().prefix(2).joined()))
+            // 预览用视频封面
+            item.preview = (((v["cover"] as? [String: Any])?["url_list"] as? [String]) ?? []).compactMap(URL.init).first
+            items.append(item)
         }
         if items.isEmpty { throw XHSError("这个作品里没找到可保存的内容") }
         let desc = (d["item_title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? d["desc"] as? String ?? ""

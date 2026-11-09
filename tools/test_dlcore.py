@@ -158,6 +158,13 @@ r = fetch(d, limit=1)
 check("limit=1 只下第 1 项", r.get("ok") and len(r["items"]) == 1 and len(media_files(d)) == 1, r)
 shutil.rmtree(d)
 
+d = tempfile.mkdtemp()
+probe(d, "partial.html")
+r = fetch(d, only=[3])
+check("only=[3] 只下第 3 项（预览页勾选），放在它自己的子文件夹", r.get("ok") and len(r["items"]) == 1
+      and os.path.basename(os.path.dirname(r["items"][0]["streams"][0]["path"])) == "003" and len(media_files(d)) == 1, r)
+shutil.rmtree(d)
+
 print("取消")
 d = tempfile.mkdtemp()
 probe(d, "two.html")

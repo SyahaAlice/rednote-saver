@@ -45,6 +45,7 @@ enum Weibo {
         let urls = imageURLs(info)
         guard let best = urls.first else { return nil }
         var item = NoteMedia(kind: .image, original: [best], fallback: Array(urls.dropFirst().prefix(1)))
+        item.preview = urls.last  // 预览用最小的那一档
         // 实况图：电脑版的动态视频在 video，手机版在 videoSrc
         if let clip = JSONTree.url(info["video"]) ?? JSONTree.url(info["videoSrc"]) {
             item.kind = .live

@@ -18,6 +18,8 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 - `Info.plist` 的基础名必须是纯英文，中文名写在 `zh-Hans.lproj/InfoPlist.strings`；`NSPhotoLibraryUsageDescription` 不能删（申请完整相册权限时会闪退）。
 - release 标题格式「最新版（日期 · 7 位提交号）」不能变，仓库外的脚本靠它判断新包是否就绪。
 - 新增一种「等用户回答」的界面时，必须在 `SaveService.cancel()` 里加上收掉它的那一行（见 architecture.md 第 2 节）。
+- 进度信息默认算细节：`service.say(…, detail: true)`。只有「解析到了什么、存了什么、哪里失败」才不带 `detail`。
+- 登录、cookie 相关的界面只放在设置页，不要在下载流程里弹登录页。
 
 ## 不能做的事
 
@@ -40,6 +42,11 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 | `save` | 「保存到相册」按钮 |
 | `cancel` | 保存过程中的「取消」按钮（只在保存时出现） |
 | `phase` | 当前阶段。它的「值」是固定的英文代号：`idle`、`parsing`、`waiting-user`、`downloading`、`saving-3-of-9`、`finished`、`failed`、`cancelled` |
-| `capture-cancel`、`capture-reload` | 内置浏览器读取页（Instagram、X、微博）的「取消」「重新加载」 |
+| `capture-cancel`、`capture-reload` | 内置浏览器读取页（Instagram、X、微博、快手）的「取消」「重新加载」 |
+| `preview-save`、`preview-cancel` | 预览页的「保存 N 项」「取消」 |
+| `latest` | 保存过程中「正在做什么」的那一行 |
+| `details` | 「完整过程」，点开是全部日志 |
 
-`phase` 是 `waiting-user` 时，流程在等人回答（弹窗、选相册、登录页或浏览器读取页），不会自己往下走。
+`phase` 是 `waiting-user` 时，流程在等人回答（弹窗、预览页、选相册或浏览器读取页），不会自己往下走。默认每次保存都会先停在预览页，要点 `preview-save` 才继续（可在设置里关掉「保存前预览」）。
+
+登录和 cookie 相关的界面只在「设置」页（第三个标签）。

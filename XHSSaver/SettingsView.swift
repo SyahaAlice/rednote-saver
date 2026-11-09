@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject private var web = WebAccounts.shared
+    @ObservedObject private var service = SaveService.shared
+    @AppStorage(Prefs.previewBeforeSaveKey) private var previewBeforeSave = true
     @State private var loginAccount: WebAccount?
     @State private var showAdd = false
     /// 号池文件夹里的所有 cookies 文件（App 内登录导出的 + 电脑导入的）
@@ -47,6 +49,7 @@ struct SettingsView: View {
                         ForEach(Prefs.BiliCover.allCases) { c in Text(c.title).tag(c.rawValue) }
                     }
                     Toggle("照片日期用作品发布时间", isOn: $usePublishDate)
+                    Toggle("保存前预览", isOn: $previewBeforeSave)
                     Toggle("保存前选择相册", isOn: $askAlbum)
                     HStack {
                         Text("下载记录：\(historyCount) 条")
@@ -59,6 +62,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("""
                     图片格式：HEIC 是小红书原图本身，体积最小；JPEG / PNG 由小红书服务器从原图转换，分辨率不变。
+                    保存前预览：解析完先列出这个作品里的图片和视频，勾选后才开始下载；关掉就解析完直接保存。
                     视频清晰度：用 yt-dlp 下载的网站（B 站、YouTube 等）默认取能拿到的最高清晰度；4K 文件很大，想省空间可以设上限。小红书、抖音、快手、Instagram、X、微博的图片和视频始终取最高的。
                     一个链接最多保存：只对主页、合集、播放列表这类一个链接里有很多作品的情况起作用，超过 20 项时还会先问你；选「不限」就没有上限。
                     B 站封面：保存 B 站视频时把封面图（原始尺寸）也存进同一个相册；选「只保存封面」就不下载视频。
@@ -229,6 +233,8 @@ struct SettingsView: View {
                     loginAccount = account
                 }
             }
+            .onAppear { openRequestedLogin() }
+            .onChange(of: service.loginRequest) { _ in openRequestedLogin() }
             .task {
                 pool = CookiePool.summaries()
                 historyCount = History.count
@@ -314,6 +320,13 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    /// 下载页保存失败、需要登录时，会切到这一页并请它打开那个网站的登录页
+    private func openRequestedLogin() {
+        guard let url = service.loginRequest else { return }
+        service.loginRequest = nil
+        loginAccount = WebAccounts.shared.accountForLogin(url: url)
     }
 
     private func runGallery(_ op: @escaping () async throws -> YtDlp.GalleryVersion) async {
