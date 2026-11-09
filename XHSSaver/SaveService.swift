@@ -1,51 +1,78 @@
 import Foundation
+import Photos
 
-/// 原图 / 原片拿不到时，问用户要不要改用替代版本
-struct FallbackPrompt: Identifiable {
+/// 弹窗提问：options 是按钮文字，返回点了第几个；点「取消/跳过」返回 nil
+struct ChoicePrompt: Identifiable {
     let id = UUID()
     let title: String
     let message: String
-    let useLabel: String
+    let options: [String]
+    let cancelLabel: String
 }
 
-enum FallbackChoice { case use, useForAll, skip }
+/// 相册归类：解析完后让用户选放进哪个相册
+struct AlbumRequest: Identifiable {
+    let id = UUID()
+    let platform: String
+    let author: Author
+    let suggestedName: String
+    let matches: [Albums.Match]
+}
 
-/// 整个保存流程：
-/// - 小红书：App 自己解析（支持实况照片），号池账号按 dl.py 的规则轮换
-/// - 其它网站：内嵌的 yt-dlp 下载，音视频分开的用 AVFoundation 合并
+enum AlbumDecision {
+    case existing(PHAssetCollection)
+    case create(String)
+    case none
+}
+
+/// 整个保存流程：选解析器 → 解析 → 查重 → 日期/相册 → 下载保存 → 记录
 @MainActor
 final class SaveService: ObservableObject {
     static let shared = SaveService()
 
     @Published private(set) var isRunning = false
     @Published private(set) var log: [String] = []
-    @Published var prompt: FallbackPrompt?
+    @Published var prompt: ChoicePrompt?
+    @Published var albumRequest: AlbumRequest?
     /// 抖音读取作品时弹出的内置浏览器
     @Published var capture: DouyinCapture?
 
-    private var promptContinuation: CheckedContinuation<FallbackChoice, Never>?
-    private var referer = "https://www.xiaohongshu.com/"
+    private var promptContinuation: CheckedContinuation<Int?, Never>?
+    private var albumContinuation: CheckedContinuation<AlbumDecision, Never>?
     private var useFallbackForAll = false
+    private var referer = ""
+    private var target = SaveTarget()
 
     func say(_ line: String) {
         log.append(line)
     }
 
-    // MARK: - 替代版本确认
+    // MARK: - 提问
 
-    private func ask(_ title: String, _ message: String, useLabel: String) async -> FallbackChoice {
-        if useFallbackForAll { return .use }
-        return await withCheckedContinuation { c in
+    func ask(_ title: String, _ message: String, options: [String], cancel: String = "跳过") async -> Int? {
+        await withCheckedContinuation { c in
             promptContinuation = c
-            prompt = FallbackPrompt(title: title, message: message, useLabel: useLabel)
+            prompt = ChoicePrompt(title: title, message: message, options: options, cancelLabel: cancel)
         }
     }
 
-    func answer(_ choice: FallbackChoice) {
-        if choice == .useForAll { useFallbackForAll = true }
+    func answer(_ index: Int?) {
         prompt = nil
-        promptContinuation?.resume(returning: choice == .skip ? .skip : .use)
+        promptContinuation?.resume(returning: index)
         promptContinuation = nil
+    }
+
+    func decideAlbum(_ decision: AlbumDecision) {
+        albumRequest = nil
+        albumContinuation?.resume(returning: decision)
+        albumContinuation = nil
+    }
+
+    /// 弹出抖音内置浏览器并等它读到作品数据
+    func runCapture(_ cap: DouyinCapture) async throws -> [String: Any] {
+        capture = cap
+        defer { capture = nil }
+        return try await cap.run()
     }
 
     // MARK: - 入口
@@ -61,14 +88,9 @@ final class SaveService: ObservableObject {
         do {
             guard let url = NoteParser.extractURL(text) else { throw XHSError("没找到链接") }
             try await PhotoSaver.ensureAccess()
-            let summary: String
-            if NoteParser.isXHS(url) {
-                summary = try await saveXHS(url)
-            } else if Douyin.isDouyin(url) {
-                summary = try await saveDouyin(url)
-            } else {
-                summary = try await saveWithYtDlp(url)
-            }
+            let note = try await Extractors.pick(for: url).extract(url, service: self)
+            defer { if let d = note.workDir { try? FileManager.default.removeItem(at: d) } }
+            let summary = try await save(note)
             say("✅ " + summary)
             return summary
         } catch {
@@ -77,50 +99,69 @@ final class SaveService: ObservableObject {
         }
     }
 
-    // MARK: - 小红书
+    private func save(_ note: ParsedNote) async throws -> String {
+        let title = note.title.isEmpty ? note.id : String(note.title.prefix(40))
+        say("\(note.platform)：\(title)（\(note.items.count) 项）")
+        if let a = note.author { say("作者：\(a.name)（\(a.primaryID)）") }
 
-    private func saveXHS(_ url: URL) async throws -> String {
-        say("解析小红书链接…")
-        var note: ParsedNote?
-        var lastError: Error = XHSError("解析失败")
-        for ck in CookiePool.candidates(for: url) {
-            say("使用账号：\(ck?.lastPathComponent ?? "无（游客）")")
-            do {
-                note = try await NoteParser.parse(url: url, cookieFile: ck)
-                break
-            } catch {
-                lastError = error
-                say("失败：\(error.localizedDescription)")
+        // 下载记录：保存过的先问一句
+        if let last = History.savedDate(note.historyKey) {
+            let when = last.formatted(date: .abbreviated, time: .shortened)
+            if await ask("这个作品已经保存过", "上次保存于 \(when)。要再保存一次吗？",
+                         options: ["再保存一次"], cancel: "不用了") == nil {
+                return "已跳过（之前保存过）"
             }
         }
-        guard let note else { throw lastError }
-        return try await saveNote(note)
-    }
 
-    // MARK: - 抖音
-
-    private func saveDouyin(_ url: URL) async throws -> String {
-        say("解析抖音链接…")
-        let ref = try await Douyin.resolve(url)
-        guard let account = WebAccounts.shared.accounts(for: "douyin.com").first else {
-            throw XHSError("抖音需要登录：请先到「设置 → 账号」添加一个抖音账号并登录")
+        target = SaveTarget()
+        if Prefs.usePublishDate, let p = note.published {
+            target.creationDate = p
+            say("照片日期设为发布时间：\(p.formatted(date: .abbreviated, time: .shortened))")
         }
-        say("用账号「\(account.name)」在内置浏览器里读取作品…")
-        let cap = DouyinCapture(account: account, target: ref)
-        capture = cap
-        defer { capture = nil }
-        let detail = try await cap.run()
-        capture = nil
-        await WebAccounts.shared.exportCookies(account)  // 顺便刷新号池里的抖音 cookie
-        return try await saveNote(try Douyin.parse(detail: detail))
+        if Prefs.askAlbum {
+            target.album = try await chooseAlbum(for: note)
+        }
+
+        let summary = try await saveItems(note)
+        History.record(note.historyKey)
+        return summary
     }
 
-    // MARK: - 小红书 / 抖音共用的保存流程
+    // MARK: - 相册归类
 
-    private func saveNote(_ note: ParsedNote) async throws -> String {
-        say("作品：\(note.title.isEmpty ? note.id : String(note.title.prefix(40)))（\(note.items.count) 项）")
+    private func chooseAlbum(for note: ParsedNote) async throws -> PHAssetCollection? {
+        guard let author = note.author, !author.primaryID.isEmpty || !author.name.isEmpty else {
+            say("拿不到作者信息，不做相册归类")
+            return nil
+        }
+        guard await PhotoSaver.hasFullAccess() else {
+            say("没有「完整照片访问」权限，读不到已有相册，这次不做相册归类（可在系统设置里改）")
+            return nil
+        }
+        let request = AlbumRequest(platform: note.platform, author: author,
+                                   suggestedName: Albums.ruleName(platform: note.platform, author: author),
+                                   matches: Albums.matches(for: author))
+        let decision = await withCheckedContinuation { (c: CheckedContinuation<AlbumDecision, Never>) in
+            albumContinuation = c
+            albumRequest = request
+        }
+        switch decision {
+        case .existing(let album):
+            say("放入相册：\(album.localizedTitle ?? "")")
+            return album
+        case .create(let name):
+            let album = try await Albums.create(name)
+            say("新建相册：\(name)")
+            return album
+        case .none:
+            return nil
+        }
+    }
+
+    // MARK: - 下载并存进相册
+
+    private func saveItems(_ note: ParsedNote) async throws -> String {
         referer = note.referer
-
         let dir = try LiveTools.workDir("note-\(note.id)")
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -130,12 +171,17 @@ final class SaveService: ObservableObject {
             do {
                 switch item.kind {
                 case .video:
-                    say("第 \(n) 项：下载视频…")
-                    if try await saveXHSVideo(item, dir: dir, name: n) { videos += 1 } else { skipped += 1 }
+                    say("第 \(n) 项：\(item.localFile == nil ? "下载视频…" : "保存视频…")")
+                    if let file = try await fileFor(item, dir: dir, name: n, what: "原片") {
+                        try await saveVideoOrKeepFile(file, title: note.title.isEmpty ? note.id : note.title)
+                        videos += 1
+                    } else {
+                        skipped += 1
+                    }
                 case .image:
-                    say("第 \(n) 项：下载图片…")
-                    if let file = try await downloadOriginal(item, dir: dir, name: n, what: "原图") {
-                        try await PhotoSaver.saveImage(file)
+                    say("第 \(n) 项：\(item.localFile == nil ? "下载图片…" : "保存图片…")")
+                    if let file = try await fileFor(item, dir: dir, name: n, what: "原图") {
+                        try await PhotoSaver.saveImage(file, target: target)
                         images += 1
                     } else {
                         skipped += 1
@@ -160,108 +206,78 @@ final class SaveService: ObservableObject {
         if videos > 0 { parts.append("\(videos) 个视频") }
         if parts.isEmpty && failures > 0 { throw XHSError("一项都没保存成功") }
         var summary = parts.isEmpty ? "没有保存任何内容" : "已保存 " + parts.joined(separator: "、")
+        if let album = target.album?.localizedTitle { summary += "（相册：\(album)）" }
         if skipped > 0 { summary += "，跳过 \(skipped) 项" }
         if failures > 0 { summary += "，\(failures) 项失败" }
         return summary
     }
 
-    /// 先下原图/原片；失败时问用户是否改用网页版。返回 nil 表示用户选择跳过
-    private func downloadOriginal(_ item: NoteMedia, dir: URL, name: String, what: String) async throws -> URL? {
-        var originalError: Error?
+    /// 已下载好的文件直接用；否则先下首选地址，失败时问用户是否改用替代版本。返回 nil 表示跳过
+    private func fileFor(_ item: NoteMedia, dir: URL, name: String, what: String) async throws -> URL? {
+        if let f = item.localFile { return f }
+        var firstError: Error?
         if !item.original.isEmpty {
             do {
                 return try await Downloader.download(item.original, to: dir, name: name, referer: referer)
             } catch {
-                originalError = error
+                firstError = error
                 say("第 \(name) 项\(what)下载失败：\(error.localizedDescription)")
             }
         }
-        guard !item.fallback.isEmpty else { throw originalError ?? XHSError("没有可用的下载地址") }
-        let replacement = what == "原片" ? "较低清晰度的视频" : "网页压缩图（可能带水印）"
-        let choice = await ask("第 \(name) 项拿不到\(what)",
-                               "要改存\(replacement)吗？",
-                               useLabel: "改存这一项")
-        if choice == .skip {
-            say("第 \(name) 项已跳过")
-            return nil
+        guard !item.fallback.isEmpty else { throw firstError ?? XHSError("没有可用的下载地址") }
+        if !useFallbackForAll {
+            let replacement = what == "原片" ? "较低清晰度的视频" : "替代版本（服务器转码的全尺寸 JPEG，不行再用网页压缩图）"
+            switch await ask("第 \(name) 项拿不到\(what)", "要改存\(replacement)吗？",
+                             options: ["改存这一项", "本次全部改存替代版本"]) {
+            case nil:
+                say("第 \(name) 项已跳过")
+                return nil
+            case 1?:
+                useFallbackForAll = true
+            default:
+                break
+            }
         }
         say("第 \(name) 项改存替代版本")
         return try await Downloader.download(item.fallback, to: dir, name: "\(name)-fallback", referer: referer)
     }
 
-    private func saveXHSVideo(_ item: NoteMedia, dir: URL, name: String) async throws -> Bool {
-        guard let file = try await downloadOriginal(item, dir: dir, name: name, what: "原片") else { return false }
-        try await saveVideoOrKeepFile(file, title: name)
-        return true
-    }
-
     private enum LiveOutcome { case live, still, skipped }
 
-    /// 存成实况照片；任何一步失败都先问用户要不要只存静态图
+    /// 存成实况照片；任何一步失败都先问用户要不要只存静态图；存完回读确认确实是实况
     private func saveLive(_ item: NoteMedia, dir: URL, name: String) async throws -> LiveOutcome {
-        guard let still = try await downloadOriginal(item, dir: dir, name: "\(name)", what: "原图") else {
-            return .skipped
-        }
+        guard let still = try await fileFor(item, dir: dir, name: name, what: "原图") else { return .skipped }
         do {
             let clip = try await Downloader.download(item.liveVideoURLs, to: dir, name: "\(name)-clip", referer: referer)
             let id = UUID().uuidString
             let photo = try LivePhotoMaker.makeImage(from: still, in: dir, name: "\(name)-live", identifier: id)
             let video = try await LivePhotoMaker.makeVideo(from: clip, in: dir, name: "\(name)-live", identifier: id)
-            try await PhotoSaver.saveLivePhoto(photo: photo, video: video)
+            let saved = try await PhotoSaver.saveLivePhoto(photo: photo, video: video, target: target)
+            if let saved, PhotoSaver.isLivePhoto(saved) == false {
+                say("⚠️ 第 \(name) 项存进去了，但相册没有把它识别成实况照片")
+            }
             return .live
         } catch {
             say("第 \(name) 项实况合成失败：\(error.localizedDescription)")
-            let choice = await ask("第 \(name) 项实况合成失败", "要只存这张的静态图吗？", useLabel: "只存静态图")
-            if choice == .skip { return .skipped }
-            try await PhotoSaver.saveImage(still)
+            if await ask("第 \(name) 项实况合成失败", "要只存这张的静态图吗？", options: ["只存静态图"]) == nil {
+                return .skipped
+            }
+            try await PhotoSaver.saveImage(still, target: target)
             return .still
         }
     }
 
-    // MARK: - 其它网站（yt-dlp）
-
-    private func saveWithYtDlp(_ url: URL) async throws -> String {
-        say("用 yt-dlp 下载：\(url.host ?? url.absoluteString)")
-        let dir = try LiveTools.workDir("ytdlp")
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let result = try await YtDlp.download(url: url, into: dir, cookies: CookiePool.candidates(for: url)) { line in
-            SaveService.shared.say(line)
-        }
-        let title = result.title.isEmpty ? "视频" : result.title
-        let file: URL
-        if result.streams.count >= 2,
-           let v = result.streams.first(where: { $0.hasVideo }),
-           let a = result.streams.first(where: { $0.hasAudio && !$0.hasVideo }) {
-            say("合并视频和音频…")
-            file = dir.appendingPathComponent("merged.mp4")
-            try await MediaMerger.merge(video: v.path, audio: a.path, to: file)
-        } else {
-            file = result.streams[0].path
-        }
-        let ext = file.pathExtension.lowercased()
-        if ["jpg", "jpeg", "png", "heic", "webp", "gif"].contains(ext) {
-            try await PhotoSaver.saveImage(file)
-            return "已保存图片：\(title)"
-        }
-        let kept = try await saveVideoOrKeepFile(file, title: title)
-        return kept ? "已保存视频：\(title)" : "相册不支持这个格式，已存到「文件 → 小红书保存 → 下载」：\(title)"
-    }
-
-    /// 存进相册；相册不收的格式（比如 webm）改存到 App 的「下载」文件夹。返回是否进了相册
-    @discardableResult
-    private func saveVideoOrKeepFile(_ file: URL, title: String) async throws -> Bool {
+    /// 存进相册；相册不收的格式（比如 webm）改存到 App 的「下载」文件夹
+    private func saveVideoOrKeepFile(_ file: URL, title: String) async throws {
         do {
-            try await PhotoSaver.saveVideo(file)
-            return true
+            try await PhotoSaver.saveVideo(file, target: target)
         } catch {
             let out = CookiePool.documents.appendingPathComponent("下载", isDirectory: true)
             try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
             let safe = title.replacingOccurrences(of: "/", with: "_").prefix(60)
             let dst = out.appendingPathComponent("\(DateFormatter.fileStamp.string(from: Date()))_\(safe).\(file.pathExtension)")
             try FileManager.default.copyItem(at: file, to: dst)
-            say("相册没有接收（\(error.localizedDescription)），已存到「文件」App：\(dst.lastPathComponent)")
-            return false
+            say("相册没有接收（\(error.localizedDescription)），已存到「文件 → 小红书保存 → 下载」：\(dst.lastPathComponent)")
         }
     }
 }

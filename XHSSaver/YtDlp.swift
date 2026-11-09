@@ -72,7 +72,15 @@ enum YtDlp {
     }
 
     struct Stream { var path: URL; var hasVideo: Bool; var hasAudio: Bool }
-    struct Result { var title: String; var streams: [Stream] }
+    struct Result {
+        var id: String
+        var title: String
+        var extractor: String
+        var uploader: String
+        var uploaderIDs: [String]
+        var published: Date?
+        var streams: [Stream]
+    }
 
     /// 下载一个链接；onLog 会收到 yt-dlp 的进度文字
     static func download(url: URL, into dir: URL, cookies: [URL?],
@@ -115,6 +123,15 @@ enum YtDlp {
                           hasAudio: (s["acodec"] as? String ?? "none") != "none")
         }
         if streams.isEmpty { throw XHSError("下载失败：没有得到文件") }
-        return Result(title: o["title"] as? String ?? "", streams: streams)
+        var published = (o["timestamp"] as? Double).map { Date(timeIntervalSince1970: $0) }
+        if published == nil, let d = o["upload_date"] as? String, d.count == 8 {
+            let f = DateFormatter()
+            f.dateFormat = "yyyyMMdd"
+            f.timeZone = TimeZone(identifier: "Asia/Shanghai")
+            published = f.date(from: d)
+        }
+        return Result(id: o["id"] as? String ?? UUID().uuidString, title: o["title"] as? String ?? "",
+                      extractor: o["extractor"] as? String ?? "", uploader: o["uploader"] as? String ?? "",
+                      uploaderIDs: o["uploader_ids"] as? [String] ?? [], published: published, streams: streams)
     }
 }

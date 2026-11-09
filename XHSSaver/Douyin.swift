@@ -98,8 +98,24 @@ enum Douyin {
         }
         if items.isEmpty { throw XHSError("这个作品里没找到可保存的内容") }
         let desc = (d["item_title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? d["desc"] as? String ?? ""
-        return ParsedNote(id: id, title: desc, type: items.first?.kind == .video ? "video" : "images",
-                          items: items, referer: "https://www.douyin.com/")
+        var author: Author?
+        if let a = d["author"] as? [String: Any] {
+            func str(_ k: String) -> String {
+                if let s = a[k] as? String { return s }
+                if let n = a[k] as? NSNumber { return n.stringValue }
+                return ""
+            }
+            // 相册名用抖音号（unique_id，没设置时是 short_id）；匹配时 uid、sec_uid 也算
+            let douyinNo = str("unique_id").isEmpty ? str("short_id") : str("unique_id")
+            let uid = str("uid")
+            let ids = [douyinNo, uid, str("sec_uid")].filter { !$0.isEmpty }
+            if !ids.isEmpty {
+                author = Author(name: str("nickname"), primaryID: douyinNo.isEmpty ? uid : douyinNo, ids: ids)
+            }
+        }
+        let published = (d["create_time"] as? Double).map { Date(timeIntervalSince1970: $0) }
+        return ParsedNote(platform: "抖音", id: id, title: desc, items: items, author: author,
+                          published: published, referer: "https://www.douyin.com/")
     }
 }
 

@@ -1,33 +1,5 @@
 import Foundation
 
-/// 出错时给用户看的中文说明
-struct XHSError: LocalizedError {
-    let message: String
-    init(_ message: String) { self.message = message }
-    var errorDescription: String? { message }
-}
-
-/// 笔记里的一个媒体项
-struct NoteMedia {
-    enum Kind { case image, live, video }
-    var kind: Kind
-    /// 原图 / 原片地址
-    var original: [URL]
-    /// 原图 / 原片失败时的替代地址（网页压缩版），使用前要先征得用户同意
-    var fallback: [URL]
-    /// 实况图的动态视频地址（只有 kind == .live 时有）
-    var liveVideoURLs: [URL] = []
-}
-
-struct ParsedNote {
-    var id: String
-    var title: String
-    var type: String
-    var items: [NoteMedia]
-    /// 下载图片/视频时带的 Referer
-    var referer: String = "https://www.xiaohongshu.com/"
-}
-
 /// 解析逻辑与 phone/dl.py、diag.py 以及 tools/parse_proto.py 一一对应
 enum NoteParser {
     /// 跟随短链时用的手机 UA（与 dl.py 相同）
@@ -44,6 +16,8 @@ enum NoteParser {
     ]
 
     static let origImageBase = "https://sns-img-bd.xhscdn.com/"
+    /// 小红书图片服务器的格式转换（原图转 JPEG / PNG，分辨率不变；借鉴自 XHS-Downloader）
+    static let convertBase = "https://ci.xiaohongshu.com/"
     static let origVideoBase = "https://sns-video-bd.xhscdn.com/"
 
     // MARK: - 链接处理
@@ -170,12 +144,19 @@ enum NoteParser {
             if original.isEmpty && fallback.isEmpty { throw XHSError("没找到视频地址") }
             items.append(NoteMedia(kind: .video, original: original, fallback: fallback))
         } else {
+            let format = Prefs.imageFormat
             for img in note["imageList"] as? [[String: Any]] ?? [] {
-                var original: [URL] = []
-                if let fid = img["fileId"] as? String, !fid.isEmpty, let u = URL(string: origImageBase + fid) {
-                    original.append(u)  // 原图（通常是 HEIC）
+                let fid = img["fileId"] as? String ?? ""
+                let heic = fid.isEmpty ? nil : URL(string: origImageBase + fid)              // 原图，通常是 HEIC
+                let jpeg = fid.isEmpty ? nil : URL(string: convertBase + fid + "?imageView2/2/format/jpeg")
+                let png = fid.isEmpty ? nil : URL(string: convertBase + fid + "?imageView2/2/format/png")
+                let web = https(img["urlDefault"] as? String)                                // 网页压缩图，最后的退路
+                let original: [URL], fallback: [URL]
+                switch format {
+                case .heic: (original, fallback) = ([heic].compactMap { $0 }, [jpeg, web].compactMap { $0 })
+                case .jpeg: (original, fallback) = ([jpeg].compactMap { $0 }, [heic, web].compactMap { $0 })
+                case .png: (original, fallback) = ([png].compactMap { $0 }, [jpeg, web].compactMap { $0 })
                 }
-                let fallback = [https(img["urlDefault"] as? String)].compactMap { $0 }
                 var item = NoteMedia(kind: .image, original: original, fallback: fallback)
                 if img["livePhoto"] as? Bool == true,
                    let h = ((img["stream"] as? [String: Any])?["h264"] as? [[String: Any]])?.first,
@@ -187,7 +168,14 @@ enum NoteParser {
             }
             if items.isEmpty { throw XHSError("这篇笔记里没找到图片") }
         }
-        return ParsedNote(id: noteID, title: note["title"] as? String ?? "", type: type, items: items)
+        var author: Author?
+        if let user = note["user"] as? [String: Any], let uid = user["userId"] as? String, !uid.isEmpty {
+            author = Author(name: user["nickname"] as? String ?? "", primaryID: uid, ids: [uid])
+        }
+        let published = (note["time"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
+        let title = (note["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? note["desc"] as? String ?? ""
+        return ParsedNote(platform: "小红书", id: noteID, title: title, items: items,
+                          author: author, published: published)
     }
 }
 

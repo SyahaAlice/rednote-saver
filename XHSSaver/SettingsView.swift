@@ -5,6 +5,10 @@ struct SettingsView: View {
     @State private var loginAccount: WebAccount?
     @State private var showAdd = false
     @State private var accounts: [CookiePool.Summary] = []
+    @AppStorage(Prefs.imageFormatKey) private var imageFormat = Prefs.ImageFormat.heic.rawValue
+    @AppStorage(Prefs.usePublishDateKey) private var usePublishDate = false
+    @AppStorage(Prefs.askAlbumKey) private var askAlbum = true
+    @State private var historyCount = History.count
     @State private var version: YtDlp.Version?
     @State private var versionError = ""
     @State private var updating = false
@@ -14,6 +18,31 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Picker("小红书图片格式", selection: $imageFormat) {
+                        ForEach(Prefs.ImageFormat.allCases) { f in Text(f.title).tag(f.rawValue) }
+                    }
+                    Toggle("照片日期用作品发布时间", isOn: $usePublishDate)
+                    Toggle("保存前选择相册", isOn: $askAlbum)
+                    HStack {
+                        Text("下载记录：\(historyCount) 条")
+                        Spacer()
+                        Button("清空", role: .destructive) {
+                            History.clear()
+                            historyCount = History.count
+                        }
+                        .disabled(historyCount == 0)
+                    }
+                } header: {
+                    Text("保存")
+                } footer: {
+                    Text("""
+                    图片格式：HEIC 是小红书原图本身，体积最小；JPEG / PNG 由小红书服务器从原图转换，分辨率不变。
+                    选择相册需要「完整照片访问」权限（要读取已有相册名）：会按作者 ID 找已有相册，找不到就按「作者名字（平台名_作者ID）」新建。
+                    下载记录只存平台和作品 ID，保存过的作品再存时会先问你。
+                    """)
+                }
+
                 Section {
                     if web.accounts.isEmpty {
                         Text("还没有账号。抖音必须登录才能保存；其它网站登录后能拿到更多内容。")
@@ -133,6 +162,7 @@ struct SettingsView: View {
             }
             .task {
                 accounts = CookiePool.summaries()
+                historyCount = History.count
                 if version == nil { await run { try await YtDlp.version() } }
             }
         }

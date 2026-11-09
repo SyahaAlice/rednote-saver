@@ -15,13 +15,17 @@ struct ContentView: View {
         }
         .alert(service.prompt?.title ?? "", isPresented: Binding(
             get: { service.prompt != nil },
-            set: { if !$0, service.prompt != nil { service.answer(.skip) } }
+            set: { if !$0, service.prompt != nil { service.answer(nil) } }
         ), presenting: service.prompt) { p in
-            Button(p.useLabel) { service.answer(.use) }
-            Button("本次全部改存替代版本") { service.answer(.useForAll) }
-            Button("跳过", role: .cancel) { service.answer(.skip) }
+            ForEach(Array(p.options.enumerated()), id: \.offset) { i, label in
+                Button(label) { service.answer(i) }
+            }
+            Button(p.cancelLabel, role: .cancel) { service.answer(nil) }
         } message: { p in
             Text(p.message)
+        }
+        .sheet(item: $service.albumRequest) { req in
+            AlbumChoiceView(request: req)
         }
         .sheet(item: $service.capture) { cap in
             DouyinCaptureView(capture: cap)
@@ -85,5 +89,63 @@ struct DownloadView: View {
             }
             .navigationTitle("小红书保存")
         }
+    }
+}
+
+/// 解析完后选相册：已有相册（名字里有作者 ID 的排前面）/ 按规则新建 / 不放入相册
+struct AlbumChoiceView: View {
+    let request: AlbumRequest
+    @ObservedObject private var service = SaveService.shared
+    @State private var newName = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    LabeledContent("作者", value: request.author.name)
+                    LabeledContent("\(request.platform) ID", value: request.author.primaryID)
+                        .textSelection(.enabled)
+                }
+                if !request.matches.isEmpty {
+                    Section {
+                        ForEach(request.matches, id: \.album.localIdentifier) { m in
+                            Button {
+                                service.decideAlbum(.existing(m.album))
+                            } label: {
+                                HStack {
+                                    Text(m.title)
+                                    Spacer()
+                                    Text(m.byID ? "ID 匹配" : "仅昵称匹配")
+                                        .font(.caption)
+                                        .foregroundStyle(m.byID ? .green : .orange)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("放入已有相册")
+                    } footer: {
+                        Text("「仅昵称匹配」可能是同名的其他作者，请确认。")
+                    }
+                }
+                Section {
+                    TextField("相册名", text: $newName)
+                    Button("新建并放入") {
+                        let name = newName.trimmingCharacters(in: .whitespaces)
+                        service.decideAlbum(.create(name.isEmpty ? request.suggestedName : name))
+                    }
+                } header: {
+                    Text(request.matches.isEmpty ? "没有找到这个作者的相册，新建一个" : "新建相册")
+                } footer: {
+                    Text("默认按「作者名字（平台名_作者ID）」命名，可以修改。")
+                }
+                Section {
+                    Button("不放入相册，直接保存") { service.decideAlbum(.none) }
+                }
+            }
+            .navigationTitle("放进哪个相册")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear { newName = request.suggestedName }
+        }
+        .interactiveDismissDisabled()
     }
 }

@@ -19,7 +19,10 @@ enum LivePhotoMaker {
         }
         let writable = (CGImageDestinationCopyTypeIdentifiers() as? [String]) ?? []
         let outType: UTType
-        if writable.contains(srcType as String), let t = UTType(srcType as String) {
+        // PNG 带不了 Apple MakerNote（配对标记），实况封面改存 HEIC
+        if (srcType as String) == UTType.png.identifier {
+            outType = writable.contains(UTType.heic.identifier) ? .heic : .jpeg
+        } else if writable.contains(srcType as String), let t = UTType(srcType as String) {
             outType = t
         } else {
             outType = .jpeg
@@ -95,7 +98,15 @@ enum LivePhotoMaker {
         }
 
         let writer = try AVAssetWriter(outputURL: dst, fileType: .mov)
-        writer.metadata = [contentIdentifierItem(identifier)]
+        // 除了配对 ID，再补上 iPhone 自己拍的实况视频里都有的两项（借鉴 makelive 等项目），
+        // 让「循环播放」「长曝光」等效果更稳定
+        writer.metadata = [contentIdentifierItem(identifier),
+                           quickTimeItem("com.apple.quicktime.live-photo.auto", 1 as NSNumber,
+                                         kCMMetadataBaseDataType_SInt8 as String),
+                           quickTimeItem("com.apple.quicktime.live-photo.vitality-score", 1.0 as NSNumber,
+                                         kCMMetadataBaseDataType_Float32 as String),
+                           quickTimeItem("com.apple.quicktime.live-photo.vitality-scoring-version", 4 as NSNumber,
+                                         kCMMetadataBaseDataType_SInt64 as String)]
 
         let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: vFormat)
         vIn.transform = transform
@@ -174,6 +185,15 @@ enum LivePhotoMaker {
         item.key = "com.apple.quicktime.content.identifier" as NSString
         item.value = identifier as NSString
         item.dataType = kCMMetadataBaseDataType_UTF8 as String
+        return item
+    }
+
+    private static func quickTimeItem(_ key: String, _ value: NSNumber, _ type: String) -> AVMetadataItem {
+        let item = AVMutableMetadataItem()
+        item.keySpace = .quickTimeMetadata
+        item.key = key as NSString
+        item.value = value
+        item.dataType = type
         return item
     }
 
