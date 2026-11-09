@@ -12,7 +12,7 @@ protocol SiteExtractor {
 
 @MainActor
 enum Extractors {
-    static let all: [SiteExtractor] = [XHSExtractor(), DouyinExtractor(), YtDlpExtractor()]
+    static let all: [SiteExtractor] = [XHSExtractor(), DouyinExtractor(), InstagramExtractor(), YtDlpExtractor()]
 
     static func pick(for url: URL) -> SiteExtractor {
         all.first { $0.canHandle(url) } ?? YtDlpExtractor()
@@ -58,6 +58,31 @@ struct DouyinExtractor: SiteExtractor {
         let detail = try await service.runCapture(DouyinCapture(account: account, target: ref))
         await WebAccounts.shared.exportCookies(account)  // 顺便刷新号池里的抖音 cookie
         return try Douyin.parse(detail: detail)
+    }
+}
+
+// MARK: - Instagram 帖子：内置浏览器 + 登录账号（图片、视频、多图都能存）
+
+struct InstagramExtractor: SiteExtractor {
+    let name = "Instagram"
+    func canHandle(_ url: URL) -> Bool { Instagram.isPost(url) }
+
+    func extract(_ url: URL, service: SaveService) async throws -> ParsedNote {
+        guard let account = WebAccounts.shared.accounts(for: "instagram.com").first else {
+            // 还没在 App 里登录 Instagram：照旧用 yt-dlp（号池 cookie 或游客），它只能存视频。
+            // 失败时报「需要登录」，SaveService 会提示「登录后重试」，登录后就走下面的内置浏览器
+            service.say("还没有在 App 里登录 Instagram，先用 yt-dlp 试（只能保存视频）…")
+            do {
+                return try await YtDlpExtractor().extract(url, service: service)
+            } catch {
+                throw XHSError("Instagram 需要登录才能保存图片帖子（yt-dlp：\(error.localizedDescription)）")
+            }
+        }
+        service.say("解析 Instagram 链接…")
+        service.say("用账号「\(account.name)」在内置浏览器里读取帖子…")
+        let item = try await service.runCapture(InstagramCapture(account: account, start: url))
+        await WebAccounts.shared.exportCookies(account)  // 顺便刷新号池里的 Instagram cookie
+        return try Instagram.parse(item: item)
     }
 }
 

@@ -30,6 +30,9 @@ struct ContentView: View {
         .sheet(item: $service.capture) { cap in
             DouyinCaptureView(capture: cap)
         }
+        .sheet(item: $service.instagramCapture) { cap in
+            InstagramCaptureView(capture: cap)
+        }
         .sheet(item: $service.loginAccount, onDismiss: { service.loginFinished() }) { a in
             WebLoginView(account: a)
         }

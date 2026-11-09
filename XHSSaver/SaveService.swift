@@ -36,6 +36,8 @@ final class SaveService: ObservableObject {
     @Published var albumRequest: AlbumRequest?
     /// 抖音读取作品时弹出的内置浏览器
     @Published var capture: DouyinCapture?
+    /// Instagram 读取帖子时弹出的内置浏览器
+    @Published var instagramCapture: InstagramCapture?
     /// 补登：弹出某个账号的内置浏览器登录页
     @Published var loginAccount: WebAccount?
     private var loginContinuation: CheckedContinuation<Void, Never>?
@@ -112,6 +114,14 @@ final class SaveService: ObservableObject {
         return try await cap.run()
     }
 
+    /// 弹出 Instagram 内置浏览器并等它读到帖子数据
+    func runCapture(_ cap: InstagramCapture) async throws -> [String: Any] {
+        try checkCancelled()
+        instagramCapture = cap
+        defer { instagramCapture = nil }
+        return try await cap.run()
+    }
+
     // MARK: - 入口
 
     /// 返回一句结果摘要，例如「已保存 6 张实况照片」
@@ -146,6 +156,7 @@ final class SaveService: ObservableObject {
         if albumRequest != nil { decideAlbum(.none) }
         if loginAccount != nil { loginFinished() }
         capture?.cancel()
+        instagramCapture?.cancel()
     }
 
     /// 用户点了取消就在这里停下（各个步骤之间调用）

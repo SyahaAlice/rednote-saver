@@ -16,6 +16,7 @@
 | `XHSSaver/NoteParser.swift` | 小红书：跟随短链、请求笔记页、解析 `__INITIAL_STATE__` |
 | `XHSSaver/WebAccounts.swift`、`WebViews.swift` | App 内登录账号、导出 cookie 到号池 |
 | `XHSSaver/Douyin.swift` | 抖音：内置浏览器读取作品详情、挑最高清晰度 |
+| `XHSSaver/Instagram.swift` | Instagram：内置浏览器读取帖子数据，图片、视频、多图都能存 |
 | `XHSSaver/CookiePool.swift` | 号池：读取 Netscape cookies、按网站挑账号轮换（与 `dl.py` 规则相同） |
 | `XHSSaver/YtDlp.swift`、`app/dlcore.py` | 内嵌 Python 3.13 上的 yt-dlp |
 | `XHSSaver/PythonBridge.m` | Swift ↔ Python 的桥接（Python 官方嵌入接口） |
@@ -182,6 +183,18 @@ iOS App 只能在 macOS 上编译，所以借用 GitHub 提供的 macOS 机器�
 | 带动图的图文 | 实况照片 |
 
 如果抖音要求验证，直接在弹出的页面里完成，再点「重新加载」。App 不伪造签名、不伪装浏览器。
+
+### Instagram
+
+yt-dlp 只能取 Instagram 的视频，图片帖子存不了，所以帖子链接（`/p/`、`/reel/`、`/tv/`、分享短链）由 App 自己解析，做法和抖音一样：**先在「设置 → 账号」里添加一个 Instagram 账号并登录**，保存时 App 弹出内置浏览器，用你的账号打开帖子，复制一份网页自己拿到的帖子数据。
+
+| 帖子 | 保存结果 |
+|---|---|
+| 单张图片 | 最高分辨率的那一张 |
+| 多图 / 图片和视频混排 | 每一项都保存，图片存图片、视频存视频 |
+| 视频 / Reels | 最高清晰度；失败时先问你，再改用次一档 |
+
+还没在 App 里登录 Instagram 时，照旧用 yt-dlp 试（只能存视频）；失败会提示「登录后重试」。如果 Instagram 要求登录或验证，直接在弹出的页面里完成，再点「重新加载」。其它 Instagram 链接（主页、快拍等）仍然走 yt-dlp。
 
 ### 号池（cookies）
 
