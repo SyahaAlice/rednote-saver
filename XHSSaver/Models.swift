@@ -1,10 +1,25 @@
 import Foundation
 
-/// 出错时给用户看的中文说明
+/// 出错时给用户看的中文说明。kind 是给程序看的分类：流程按它决定下一步，不用去猜说明文字
 struct XHSError: LocalizedError {
+    enum Kind {
+        /// 普通失败
+        case other
+        /// 用户取消：不再提问、不算失败
+        case cancelled
+        /// 需要登录：SaveService 会提示「登录后重试」
+        case needsLogin
+    }
+
     let message: String
-    init(_ message: String) { self.message = message }
+    let kind: Kind
+    init(_ message: String, kind: Kind = .other) {
+        self.message = message
+        self.kind = kind
+    }
     var errorDescription: String? { message }
+
+    static let cancelled = XHSError("已取消", kind: .cancelled)
 }
 
 /// 作品里的一个媒体项
@@ -124,6 +139,20 @@ enum Prefs {
         ImageFormat(rawValue: UserDefaults.standard.string(forKey: imageFormatKey) ?? "") ?? .heic
     }
     static var usePublishDate: Bool { UserDefaults.standard.bool(forKey: usePublishDateKey) }
+
+    /// yt-dlp 下载视频的清晰度上限（画面高度）；0 = 不限，取网站给的最高清晰度（默认）
+    static let maxVideoHeightKey = "maxVideoHeight"
+    struct HeightChoice: Identifiable {
+        let height: Int
+        let title: String
+        var id: Int { height }
+    }
+    static let maxVideoHeightChoices = [
+        HeightChoice(height: 0, title: "不限（最高清晰度）"), HeightChoice(height: 2160, title: "最高 4K（2160p）"),
+        HeightChoice(height: 1440, title: "最高 2K（1440p）"), HeightChoice(height: 1080, title: "最高 1080p"),
+        HeightChoice(height: 720, title: "最高 720p"),
+    ]
+    static var maxVideoHeight: Int { max(0, UserDefaults.standard.integer(forKey: maxVideoHeightKey)) }
     /// 默认开启
     static var askAlbum: Bool { UserDefaults.standard.object(forKey: askAlbumKey) as? Bool ?? true }
 }

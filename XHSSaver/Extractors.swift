@@ -12,7 +12,8 @@ protocol SiteExtractor {
 
 @MainActor
 enum Extractors {
-    static let all: [SiteExtractor] = [XHSExtractor(), DouyinExtractor(), InstagramExtractor(), YtDlpExtractor()]
+    static let all: [SiteExtractor] = [XHSExtractor(), DouyinExtractor(), InstagramExtractor(),
+                                       XExtractor(), WeiboExtractor(), YtDlpExtractor()]
 
     static func pick(for url: URL) -> SiteExtractor {
         all.first { $0.canHandle(url) } ?? YtDlpExtractor()
@@ -52,7 +53,7 @@ struct DouyinExtractor: SiteExtractor {
         let ref = try await Douyin.resolve(url)
         guard let account = WebAccounts.shared.accounts(for: "douyin.com").first else {
             // 失败后 SaveService 会提示「登录后重试」，直接带到抖音登录页
-            throw XHSError("抖音需要登录：还没有抖音账号")
+            throw XHSError("抖音需要登录：还没有抖音账号", kind: .needsLogin)
         }
         service.say("用账号「\(account.name)」在内置浏览器里读取作品…")
         let detail = try await service.runCapture(DouyinCapture(account: account, target: ref))
@@ -75,14 +76,62 @@ struct InstagramExtractor: SiteExtractor {
             do {
                 return try await YtDlpExtractor().extract(url, service: service)
             } catch {
-                throw XHSError("Instagram 需要登录才能保存图片帖子（yt-dlp：\(error.localizedDescription)）")
+                if Task.isCancelled { throw error }
+                throw XHSError("Instagram 需要登录才能保存图片帖子（yt-dlp：\(error.localizedDescription)）",
+                               kind: .needsLogin)
             }
         }
         service.say("解析 Instagram 链接…")
         service.say("用账号「\(account.name)」在内置浏览器里读取帖子…")
-        let item = try await service.runCapture(InstagramCapture(account: account, start: url))
+        let item = try await service.runCapture(Instagram.capture(account: account, start: url))
         await WebAccounts.shared.exportCookies(account)  // 顺便刷新号池里的 Instagram cookie
         return try Instagram.parse(item: item)
+    }
+}
+
+// MARK: - X、微博：视频照旧用 yt-dlp；它拿不到内容（多半是图片帖子）时改用内置浏览器 + 登录账号
+
+/// 先用 yt-dlp；失败时，如果在 App 里登录过这个网站，就用内置浏览器读取帖子数据（图片、实况图、视频都能存）。
+/// 没登录过就报「需要登录」，SaveService 会提示「登录后重试」。
+/// 已知的不足：图片和视频混排的帖子，yt-dlp 能拿到视频就不会走内置浏览器，图片会漏掉
+@MainActor
+private func ytDlpThenWeb(_ url: URL, service: SaveService, site: String, siteName: String,
+                          capture: (WebAccount) -> WebCapture,
+                          parse: ([String: Any]) throws -> ParsedNote) async throws -> ParsedNote {
+    do {
+        return try await YtDlpExtractor().extract(url, service: service)
+    } catch {
+        if Task.isCancelled { throw error }
+        service.say("yt-dlp 没有拿到视频（\(error.localizedDescription)），可能是图片帖子")
+        guard let account = WebAccounts.shared.accounts(for: site).first else {
+            throw XHSError("\(siteName)的图片帖子需要先登录\(siteName)账号才能保存", kind: .needsLogin)
+        }
+        service.say("用账号「\(account.name)」在内置浏览器里读取…")
+        let data = try await service.runCapture(capture(account))
+        await WebAccounts.shared.exportCookies(account)  // 顺便刷新号池里的 cookie
+        return try parse(data)
+    }
+}
+
+struct XExtractor: SiteExtractor {
+    let name = "X"
+    func canHandle(_ url: URL) -> Bool { XPost.isPost(url) }
+
+    func extract(_ url: URL, service: SaveService) async throws -> ParsedNote {
+        try await ytDlpThenWeb(url, service: service, site: "x.com", siteName: "X",
+                               capture: { XPost.capture(account: $0, start: url) },
+                               parse: { try XPost.parse(tweet: $0) })
+    }
+}
+
+struct WeiboExtractor: SiteExtractor {
+    let name = "微博"
+    func canHandle(_ url: URL) -> Bool { Weibo.isPost(url) }
+
+    func extract(_ url: URL, service: SaveService) async throws -> ParsedNote {
+        try await ytDlpThenWeb(url, service: service, site: "weibo.com", siteName: "微博",
+                               capture: { Weibo.capture(account: $0, start: url) },
+                               parse: { try Weibo.parse(status: $0) })
     }
 }
 
@@ -108,13 +157,51 @@ struct YtDlpExtractor: SiteExtractor {
         return CookiePool.site(of: host)
     }
 
+    /// 下载 probe 解析好的内容并整理成媒体项（音视频分开的在这里合并）。
+    /// mergeFailed = 有的项合并失败，多半是 iPhone 处理不了的编码
+    private static func collect(dir: URL, limit: Int?, service: SaveService,
+                                onLog: @escaping @MainActor (String) -> Void) async throws
+        -> (items: [NoteMedia], mergeFailed: Bool) {
+        let fetched = try await YtDlp.fetch(into: dir, limit: limit, onLog: onLog)
+        var items: [NoteMedia] = []
+        var mergeFailed = false
+        for f in fetched {
+            var item = NoteMedia(kind: .video, original: [], fallback: [])
+            if let e = f.error {
+                item.error = e  // 这一项没下载下来：保存时算作失败，其它项照常保存
+            } else if f.streams.count >= 2,
+                      let v = f.streams.first(where: { $0.hasVideo }),
+                      let a = f.streams.first(where: { $0.hasAudio && !$0.hasVideo }) {
+                service.say("合并视频和音频…")
+                let merged = v.path.deletingLastPathComponent().appendingPathComponent("merged.mp4")
+                do {
+                    try await MediaMerger.merge(video: v.path, audio: a.path, to: merged)
+                    item.localFile = merged
+                } catch {
+                    item.error = error.localizedDescription
+                    mergeFailed = true
+                }
+            } else {
+                item.localFile = f.streams[0].path
+            }
+            if let file = item.localFile,
+               ["jpg", "jpeg", "png", "heic", "webp", "gif"].contains(file.pathExtension.lowercased()) {
+                item.kind = .image
+            }
+            items.append(item)
+        }
+        return (items, mergeFailed)
+    }
+
     func extract(_ url: URL, service: SaveService) async throws -> ParsedNote {
         // 这里只解析（标题、作者、作品 ID），不下载：查重和选相册之后，SaveService 才调用 note.fetch 下载
         service.say("用 yt-dlp 解析：\(url.host ?? url.absoluteString)")
         let dir = try LiveTools.workDir("ytdlp")
         do {
             let onLog: @MainActor (String) -> Void = { SaveService.shared.say($0) }
-            let r = try await YtDlp.probe(url: url, into: dir, cookies: CookiePool.candidates(for: url), onLog: onLog)
+            let cookies = CookiePool.candidates(for: url)
+            let maxHeight = Prefs.maxVideoHeight
+            let r = try await YtDlp.probe(url: url, into: dir, cookies: cookies, maxHeight: maxHeight, onLog: onLog)
             let count = max(1, r.entryCount)
             if count > 1 {
                 service.say("这个链接里有 \(count) 项\(r.more ? "（已到单次上限，后面可能还有）" : "")，会全部保存")
@@ -130,37 +217,22 @@ struct YtDlpExtractor: SiteExtractor {
                     case 1?: limit = 1
                     default:
                         service.cancel()  // 当作用户取消：不再弹「要不要补登」之类的后续提问
-                        throw XHSError("已取消")
+                        throw XHSError.cancelled
                     }
                 }
                 service.say("用 yt-dlp 下载…")
-                let fetched = try await YtDlp.fetch(into: dir, limit: limit, onLog: onLog)
-                var items: [NoteMedia] = []
-                for f in fetched {
-                    var item = NoteMedia(kind: .video, original: [], fallback: [])
-                    if let e = f.error {
-                        item.error = e  // 这一项没下载下来：保存时算作失败，其它项照常保存
-                    } else if f.streams.count >= 2,
-                              let v = f.streams.first(where: { $0.hasVideo }),
-                              let a = f.streams.first(where: { $0.hasAudio && !$0.hasVideo }) {
-                        service.say("合并视频和音频…")
-                        let merged = v.path.deletingLastPathComponent().appendingPathComponent("merged.mp4")
-                        do {
-                            try await MediaMerger.merge(video: v.path, audio: a.path, to: merged)
-                            item.localFile = merged
-                        } catch {
-                            item.error = error.localizedDescription
-                        }
-                    } else {
-                        item.localFile = f.streams[0].path
+                var got = try await YtDlpExtractor.collect(dir: dir, limit: limit, service: service, onLog: onLog)
+                // 1080p 以上只有 HEVC 等编码，个别网站给的格式 iPhone 合并不了：先问，再改存 1080p（H.264）
+                if got.mergeFailed, maxHeight == 0 || maxHeight > 1080 {
+                    if await service.ask("最高清晰度的版本处理不了",
+                                         "音视频合并失败，多半是 iPhone 不支持这种编码。要改存 1080p 的版本吗？",
+                                         options: ["改存 1080p"]) != nil {
+                        service.say("改用 1080p 重新下载…")
+                        _ = try await YtDlp.probe(url: url, into: dir, cookies: cookies, maxHeight: 1080, onLog: onLog)
+                        got = try await YtDlpExtractor.collect(dir: dir, limit: limit, service: service, onLog: onLog)
                     }
-                    if let file = item.localFile,
-                       ["jpg", "jpeg", "png", "heic", "webp", "gif"].contains(file.pathExtension.lowercased()) {
-                        item.kind = .image
-                    }
-                    items.append(item)
                 }
-                return items
+                return got.items
             }
             // 占位：下载前还不知道每一项是图片还是视频，fetch 之后换成真正的内容
             let placeholders = Array(repeating: NoteMedia(kind: .video, original: [], fallback: []), count: count)

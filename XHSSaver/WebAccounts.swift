@@ -30,6 +30,7 @@ struct SitePreset: Identifiable {
         SitePreset(title: "哔哩哔哩", site: "bilibili.com", loginURL: "https://passport.bilibili.com/login"),
         SitePreset(title: "微博", site: "weibo.com", loginURL: "https://weibo.com/login.php"),
         SitePreset(title: "Instagram", site: "instagram.com", loginURL: "https://www.instagram.com/accounts/login/"),
+        SitePreset(title: "X", site: "x.com", loginURL: "https://x.com/i/flow/login"),
     ]
 }
 

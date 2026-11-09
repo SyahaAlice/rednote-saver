@@ -1,5 +1,4 @@
-import SwiftUI
-import WebKit
+import Foundation
 
 /// Instagram：yt-dlp 只能取视频，图片帖子存不了。
 /// 做法和抖音一样：用「设置 → 账号」里登录过的 Instagram 账号，在 App 内置浏览器里打开帖子，
@@ -137,177 +136,17 @@ enum Instagram {
                           items: items, author: author, published: published,
                           referer: "https://www.instagram.com/")
     }
-}
 
-// MARK: - 内置浏览器读取帖子数据
-
-private final class InstagramHandler: NSObject, WKScriptMessageHandler {
-    var onMessage: ((String, String) -> Void)?
-    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let d = message.body as? [String: Any],
-              let path = d["path"] as? String, let text = d["text"] as? String else { return }
-        onMessage?(path, text)
-    }
-}
-
-@MainActor
-final class InstagramCapture: ObservableObject, Identifiable {
-    let id = UUID()
-    let account: WebAccount
-    let start: URL
-    let webView: WKWebView
-    @Published var hint = "正在用 Instagram 网页读取帖子…"
-
-    private let handler = InstagramHandler()
-    private var continuation: CheckedContinuation<[String: Any], Error>?
-
-    /// 在网页里复制一份帖子数据（只读，不改动请求）。数据有两个来源：
-    /// 1. 直接写在网页里的 <script type="application/json">；
-    /// 2. 网页脚本之后请求 /graphql、/api/v1/ 接口拿到的返回内容。
-    /// 只把提到图片 / 视频字段的那几块交给 App，由 App 按帖子代码挑出要的那一个
-    private static let hookJS = """
-    (function () {
-      var KEYS = ['image_versions2', 'carousel_media', 'video_versions', 'display_url', 'display_resources'];
-      function interesting(t) {
-        if (!t || typeof t !== 'string') return false;
-        for (var i = 0; i < KEYS.length; i++) if (t.indexOf(KEYS[i]) >= 0) return true;
-        return false;
-      }
-      function send(t) {
-        try {
-          if (interesting(t)) window.webkit.messageHandlers.igCapture.postMessage({ path: location.pathname, text: t });
-        } catch (e) {}
-      }
-      function isAPI(u) { u = String(u || ''); return u.indexOf('/graphql') >= 0 || u.indexOf('/api/v1/') >= 0; }
-      var of = window.fetch;
-      if (of) {
-        window.fetch = function () {
-          var args = arguments;
-          return of.apply(this, args).then(function (r) {
-            try {
-              var u = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
-              if (isAPI(u)) r.clone().text().then(send);
-            } catch (e) {}
-            return r;
-          });
-        };
-      }
-      var oo = XMLHttpRequest.prototype.open, os = XMLHttpRequest.prototype.send;
-      XMLHttpRequest.prototype.open = function (m, u) { this.__igu = String(u); return oo.apply(this, arguments); };
-      XMLHttpRequest.prototype.send = function () {
-        var x = this;
-        x.addEventListener('load', function () {
-          try {
-            if (!isAPI(x.__igu)) return;
-            send((x.responseType === '' || x.responseType === 'text') ? x.responseText : JSON.stringify(x.response));
-          } catch (e) {}
-        });
-        return os.apply(this, arguments);
-      };
-      function scan() {
-        try {
-          var list = document.querySelectorAll('script[type="application/json"]');
-          for (var i = 0; i < list.length; i++) {
-            if (list[i].__igSeen) continue;
-            list[i].__igSeen = true;
-            send(list[i].textContent);
-          }
-        } catch (e) {}
-      }
-      document.addEventListener('DOMContentLoaded', scan);
-      var n = 0;
-      var timer = setInterval(function () { scan(); if (++n > 60) clearInterval(timer); }, 500);
-    })();
-    """
-
-    init(account: WebAccount, start: URL) {
-        self.account = account
-        self.start = start
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = account.dataStore
-        config.allowsInlineMediaPlayback = true
-        config.mediaTypesRequiringUserActionForPlayback = .all
-        config.userContentController.addUserScript(
-            WKUserScript(source: Self.hookJS, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
-        config.userContentController.add(handler, contentWorld: .page, name: "igCapture")
-        webView = WKWebView(frame: .zero, configuration: config)
-        handler.onMessage = { [weak self] path, text in
-            Task { @MainActor in self?.received(path: path, text: text) }
-        }
-    }
-
-    func run() async throws -> [String: Any] {
-        webView.load(URLRequest(url: start))
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 20_000_000_000)
-            guard let self, self.continuation != nil else { return }
-            self.hint = "还没拿到帖子数据：可能需要登录或验证。请在下方页面里完成，再点「重新加载」。"
-        }
-        return try await withCheckedThrowingContinuation { continuation = $0 }
-    }
-
-    /// path 是网页当前的路径（分享短链跳转之后才有帖子代码），text 是网页拿到的一块数据
-    private func received(path: String, text: String) {
-        guard continuation != nil, let code = Instagram.shortcode(path: path) else { return }
-        // 接口的返回内容有时是一行一个 JSON，整块读不出来就按行读
-        var chunks = [text]
-        if (try? JSONSerialization.jsonObject(with: Data(text.utf8))) == nil {
-            chunks = text.split(whereSeparator: \.isNewline).map(String.init)
-        }
-        for chunk in chunks {
-            if let obj = try? JSONSerialization.jsonObject(with: Data(chunk.utf8)),
-               let item = Instagram.find(in: obj, code: code) {
-                finish(.success(item))
-                return
-            }
-        }
-    }
-
-    func reload() {
-        hint = "正在用 Instagram 网页读取帖子…"
-        // 分享短链已经跳到帖子页的话，重新加载帖子页本身
-        webView.load(URLRequest(url: webView.url ?? start))
-    }
-
-    func cancel() {
-        finish(.failure(XHSError("已取消")))
-    }
-
-    private func finish(_ result: Result<[String: Any], Error>) {
-        guard let c = continuation else { return }
-        continuation = nil
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: "igCapture", contentWorld: .page)
-        webView.stopLoading()
-        c.resume(with: result)
-    }
-}
-
-/// 读取帖子时弹出的页面：能看到网页本身，需要登录或验证时用户可以直接操作
-struct InstagramCaptureView: View {
-    @ObservedObject var capture: InstagramCapture
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                HStack(alignment: .top) {
-                    ProgressView().padding(.trailing, 4)
-                    Text(capture.hint).font(.callout)
-                    Spacer()
-                }
-                .padding()
-                WebViewBox(webView: capture.webView)
-            }
-            .navigationTitle("Instagram（\(capture.account.name)）")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { capture.cancel() }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("重新加载") { capture.reload() }
-                }
-            }
-        }
-        .interactiveDismissDisabled()
+    /// 内置浏览器读取帖子数据（见 WebCapture.swift）：按网页当前路径里的帖子代码，从网页拿到的数据里挑出这个帖子
+    @MainActor
+    static func capture(account: WebAccount, start: URL) -> WebCapture {
+        WebCapture(account: account, start: start, spec: WebCaptureSpec(
+            title: "Instagram",
+            keywords: ["image_versions2", "carousel_media", "video_versions", "display_url", "display_resources"],
+            apiHints: ["/graphql", "/api/v1/"],
+            match: { path, value in
+                guard let code = shortcode(path: path) else { return nil }
+                return find(in: value, code: code)
+            }))
     }
 }

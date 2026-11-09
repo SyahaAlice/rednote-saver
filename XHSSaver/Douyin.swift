@@ -213,7 +213,7 @@ final class DouyinCapture: ObservableObject, Identifiable {
     }
 
     func cancel() {
-        finish(.failure(XHSError("已取消")))
+        finish(.failure(XHSError.cancelled))
     }
 
     private func finish(_ result: Result<[String: Any], Error>) {

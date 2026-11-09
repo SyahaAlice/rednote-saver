@@ -27,7 +27,10 @@ enum Downloader {
             throw XHSError("下载失败（HTTP \(code)）：\(url.absoluteString)")
         }
         let size = (try? FileManager.default.attributesOfItem(atPath: tmp.path)[.size] as? Int) ?? 0
-        guard size > 0 else { throw XHSError("下载到的文件是空的：\(url.absoluteString)") }
+        guard size > 0 else {
+            try? FileManager.default.removeItem(at: tmp)
+            throw XHSError("下载到的文件是空的：\(url.absoluteString)")
+        }
 
         let ext = fileExtension(of: tmp, mime: http.mimeType)
         let dest = dir.appendingPathComponent(name).appendingPathExtension(ext)
@@ -49,12 +52,14 @@ enum Downloader {
             }
             if head.starts(with: [0xFF, 0xD8, 0xFF]) { return "jpg" }
             if head.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "png" }
+            if head.starts(with: Data("GIF8".utf8)) { return "gif" }
             if head.count >= 12, head[0..<4] == Data("RIFF".utf8), head[8..<12] == Data("WEBP".utf8) { return "webp" }
         }
         switch mime ?? "" {
         case "image/jpeg": return "jpg"
         case "image/png": return "png"
         case "image/webp": return "webp"
+        case "image/gif": return "gif"
         case "image/heic", "image/heif": return "heic"
         case "video/quicktime": return "mov"
         case let m where m.hasPrefix("video/"): return "mp4"

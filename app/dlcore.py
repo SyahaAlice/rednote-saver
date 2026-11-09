@@ -14,16 +14,25 @@ import os
 import sys
 import traceback
 
-MAX_H = 1080
-# 优先 H.264 + AAC（iPhone 相册兼容最好），其次 HEVC，最后才是其它格式
-FORMAT = (
-    f"bv*[vcodec^=avc][height<={MAX_H}]+ba[ext=m4a]/"
-    f"b[vcodec^=avc][height<={MAX_H}]/"
-    f"bv*[vcodec~='^(hvc|hev)'][height<={MAX_H}]+ba[ext=m4a]/"
-    f"b[ext=mp4][height<={MAX_H}]/"
-    f"bv*[height<={MAX_H}]+ba/"
-    "b"
-)
+# iPhone 能直接播放、AVFoundation 能合并的视频编码：H.264 和 HEVC。
+# VP9 / AV1 相册不认，也合并不了，只在没有别的选择时才用
+_OK = "vcodec~='^(avc|hvc|hev)'"
+
+# 清晰度优先：先比分辨率，再比帧率；分辨率和帧率都一样时选 H.264（兼容性最好），
+# 所以只有在 HEVC 能给出更高清晰度时才会用 HEVC（比如 B 站的 4K）
+FORMAT_SORT = ["res", "fps", "vcodec:h264"]
+
+
+def _format(max_h):
+    """max_h 是清晰度上限（画面高度），0 / None = 不限，取网站给的最高清晰度"""
+    h = f"[height<={int(max_h)}]" if max_h else ""
+    return (
+        f"bv*[{_OK}]{h}+ba[ext=m4a]/"   # 视频和音频分开的网站（B 站、YouTube）：最高清的视频 + m4a 音频
+        f"b[{_OK}]{h}/"                 # 音视频在一个文件里的
+        f"b[ext=mp4]{h}/"
+        f"bv*{h}+ba/"                   # 其它编码：能下载，但 iPhone 多半合并不了或相册不收
+        "b"
+    )
 
 
 class _Log:
@@ -123,10 +132,15 @@ def _fail(msg):
     return json.dumps({"ok": False, "error": msg}, ensure_ascii=False)
 
 
+def _cancelled():
+    return json.dumps({"ok": False, "error": "已取消", "cancelled": True}, ensure_ascii=False)
+
+
 def _opts(a, log, cancel, ck, out_dir=None):
     opts = {
         "outtmpl": os.path.join(out_dir or a["out_dir"], "%(extractor_key)s_%(id)s.f%(format_id)s.%(ext)s"),
-        "format": a.get("format") or FORMAT,
+        "format": a.get("format") or _format(a.get("max_height")),
+        "format_sort": FORMAT_SORT,
         "noplaylist": True,  # 链接同时指向一个视频和它所在的合集时，只要这个视频
         "playlistend": MAX_ENTRIES,
         "restrictfilenames": True,
@@ -218,7 +232,8 @@ def _meta(items, top):
 
 def probe(args_json):
     """第一步：只解析。
-    参数：url, out_dir, cookies（按顺序尝试的 cookies 文件列表，null 表示游客）, log, cache_dir, cancel, format
+    参数：url, out_dir, cookies（按顺序尝试的 cookies 文件列表，null 表示游客）, log, cache_dir, cancel,
+          max_height（清晰度上限，0 = 不限）, format（直接指定 yt-dlp 的格式串，一般不用）
     返回：{"ok": true, "id", "title", "extractor", "uploader", ...,
            "entries": 链接里的项数, "more": 是否可能还有超出 MAX_ENTRIES 的没算进来}"""
     global _PENDING
@@ -231,7 +246,7 @@ def probe(args_json):
         last_err = None
         for i, ck in enumerate(cookies):
             if cancel.hit():
-                return _fail("已取消")
+                return _cancelled()
             log.write(_account(ck))
             try:
                 items, top = _extract(a["url"], _opts(a, log, cancel, ck))
@@ -271,7 +286,7 @@ def fetch(args_json):
         last_err = None
         for i in range(p["index"], len(cookies)):
             if cancel.hit():
-                return _fail("已取消")
+                return _cancelled()
             if i > p["index"]:
                 log.write(_account(cookies[i]))
                 try:
@@ -284,7 +299,7 @@ def fetch(args_json):
             out = []
             for n, (raw, chosen) in enumerate(todo, 1):
                 if cancel.hit():
-                    return _fail("已取消")
+                    return _cancelled()
                 if len(todo) > 1:
                     log.write(f"第 {n} / {len(todo)} 项")
                 sub = os.path.join(a["out_dir"], f"{n:03d}")
@@ -293,7 +308,7 @@ def fetch(args_json):
                     out.append({"streams": _download(raw, chosen, _opts(a, log, cancel, cookies[i], sub))})
                 except Exception as e:
                     if cancel.hit():
-                        return _fail("已取消")
+                        return _cancelled()
                     last_err = e
                     log.write(f"失败：{e}")
                     out.append({"error": str(e)})

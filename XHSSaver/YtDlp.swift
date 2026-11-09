@@ -131,24 +131,29 @@ enum YtDlp {
         let o = try object(try outcome.get())
         guard o["ok"] as? Bool == true else {
             let message = o["error"] as? String ?? "未知错误"
-            throw XHSError(message == "已取消" ? message : "下载失败：\(message)")
+            if o["cancelled"] as? Bool == true { throw XHSError.cancelled }
+            throw XHSError("下载失败：\(message)")
         }
         return o
     }
 
     /// 第一步：只解析链接（标题、作者、作品 ID），不下载；onLog 会收到 yt-dlp 的进度文字
-    static func probe(url: URL, into dir: URL, cookies: [URL?],
+    /// maxHeight 是清晰度上限（画面高度），0 = 不限
+    static func probe(url: URL, into dir: URL, cookies: [URL?], maxHeight: Int = 0,
                       onLog: @escaping @MainActor (String) -> Void) async throws -> Info {
         let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("yt-dlp").path
+        // 每次调用用自己的日志文件：同一个作品可能解析两次（换清晰度重试），不能把上一次的日志再显示一遍
+        let log = dir.appendingPathComponent("probe-\(UUID().uuidString.prefix(8)).log")
         let o = try await logged("probe", [
             "url": url.absoluteString,
             "out_dir": dir.path,
             "cookies": cookies.map { (c: URL?) -> Any in c.map { $0.path as Any } ?? NSNull() },
-            "log": dir.appendingPathComponent("probe.log").path,
+            "log": log.path,
             "cache_dir": cache,
             "cancel": cancelFlag(in: dir).path,
-        ], dir: dir, log: dir.appendingPathComponent("probe.log"), onLog: onLog)
+            "max_height": maxHeight,
+        ], dir: dir, log: log, onLog: onLog)
 
         var published = (o["timestamp"] as? Double).map { Date(timeIntervalSince1970: $0) }
         if published == nil, let d = o["upload_date"] as? String, d.count == 8 {
@@ -168,7 +173,7 @@ enum YtDlp {
     /// limit 不为 nil 时只下载前几项。返回的数组和链接里的项一一对应，失败的项带 error
     static func fetch(into dir: URL, limit: Int? = nil,
                       onLog: @escaping @MainActor (String) -> Void) async throws -> [Fetched] {
-        let log = dir.appendingPathComponent("fetch.log")
+        let log = dir.appendingPathComponent("fetch-\(UUID().uuidString.prefix(8)).log")
         var args: [String: Any] = ["log": log.path, "cancel": cancelFlag(in: dir).path]
         if let limit { args["limit"] = limit }
         let o = try await logged("fetch", args, dir: dir, log: log, onLog: onLog)

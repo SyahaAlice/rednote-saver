@@ -30,8 +30,8 @@ struct ContentView: View {
         .sheet(item: $service.capture) { cap in
             DouyinCaptureView(capture: cap)
         }
-        .sheet(item: $service.instagramCapture) { cap in
-            InstagramCaptureView(capture: cap)
+        .sheet(item: $service.webCapture) { cap in
+            WebCaptureView(capture: cap)
         }
         .sheet(item: $service.loginAccount, onDismiss: { service.loginFinished() }) { a in
             WebLoginView(account: a)
@@ -174,7 +174,17 @@ struct DownloadView: View {
             HStack {
                 CardTitle(icon: "list.bullet.rectangle.portrait", text: "进度")
                 Spacer()
+                // 当前阶段：给人看的是中文，给自动化操作读的是固定的英文代号（辅助功能的值）
+                Text(service.phase.label)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("phase")
+                    .accessibilityValue(service.phase.code)
                 if service.isRunning { ProgressView().controlSize(.small) }
+            }
+            if case .saving(let index, let total) = service.phase, total > 1 {
+                ProgressView(value: Double(index - 1), total: Double(total))
+                    .tint(Theme.violet)
             }
             let lines = Array(service.log.suffix(60))
             VStack(alignment: .leading, spacing: 8) {
