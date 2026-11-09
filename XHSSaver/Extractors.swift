@@ -13,7 +13,7 @@ protocol SiteExtractor {
 @MainActor
 enum Extractors {
     static let all: [SiteExtractor] = [XHSExtractor(), DouyinExtractor(), InstagramExtractor(),
-                                       XExtractor(), WeiboExtractor(), YtDlpExtractor()]
+                                       XExtractor(), WeiboExtractor(), KuaishouExtractor(), YtDlpExtractor()]
 
     static func pick(for url: URL) -> SiteExtractor {
         all.first { $0.canHandle(url) } ?? YtDlpExtractor()
@@ -135,6 +135,50 @@ struct WeiboExtractor: SiteExtractor {
     }
 }
 
+// MARK: - 快手：App 自己读网页（图集、单图、视频），游客优先；不行再用内置浏览器 + 登录账号
+
+struct KuaishouExtractor: SiteExtractor {
+    let name = "快手"
+    func canHandle(_ url: URL) -> Bool { Kuaishou.isPost(url) }
+
+    func extract(_ url: URL, service: SaveService) async throws -> ParsedNote {
+        service.say("解析快手链接…")
+        var lastError: Error = XHSError("快手网页里没有作品数据")
+        // 1. 直接请求网页：先游客，再号池里的快手账号
+        for ck in CookiePool.candidates(for: url) {
+            service.say("使用账号：\(ck?.lastPathComponent ?? "无（游客）")")
+            do {
+                let page = try await Kuaishou.fetchPage(url, cookieFile: ck)
+                if let state = Kuaishou.pageState(page.html) {
+                    return try Kuaishou.parse(state, pageURL: page.url)
+                }
+                lastError = XHSError("快手网页里没有作品数据（可能需要验证）")
+            } catch {
+                if Task.isCancelled { throw error }
+                lastError = error
+            }
+            service.say("失败：\(lastError.localizedDescription)")
+        }
+        // 2. 用登录过的快手账号在内置浏览器里打开，需要验证时由用户在页面里完成
+        if let account = WebAccounts.shared.accounts(for: "kuaishou.com").first {
+            service.say("用账号「\(account.name)」在内置浏览器里读取…")
+            let capture = Kuaishou.capture(account: account, start: url)
+            let state = try await service.runCapture(capture)
+            let pageURL = capture.webView.url ?? url
+            await WebAccounts.shared.exportCookies(account)
+            return try Kuaishou.parse(state, pageURL: pageURL)
+        }
+        // 3. 最后试 yt-dlp（只有视频）；还不行就提示登录
+        do {
+            return try await YtDlpExtractor().extract(url, service: service)
+        } catch {
+            if Task.isCancelled { throw error }
+            throw XHSError("快手没有读到作品数据（\(lastError.localizedDescription)）。登录快手账号后可以在内置浏览器里读取",
+                           kind: .needsLogin)
+        }
+    }
+}
+
 // MARK: - 其它网站：内嵌的 yt-dlp
 
 struct YtDlpExtractor: SiteExtractor {
@@ -206,7 +250,13 @@ struct YtDlpExtractor: SiteExtractor {
             if count > 1 {
                 service.say("这个链接里有 \(count) 项\(r.more ? "（已到单次上限，后面可能还有）" : "")，会全部保存")
             }
+            let platform = Self.platformName(r.extractor, host: url.host ?? "")
+            // B 站封面：yt-dlp 给的封面地址就是原始尺寸的封面图
+            let coverMode = platform == "哔哩哔哩" && r.thumbnail != nil ? Prefs.biliCover : .off
+            let cover = r.thumbnail.map { NoteMedia(kind: .image, original: [$0], fallback: []) }
+            if coverMode == .only { service.say("按设置只保存封面，不下载视频") }
             let fetch: @MainActor () async throws -> [NoteMedia] = {
+                if coverMode == .only, let cover { return [cover] }
                 // 多图 / 多视频帖子不会超过 20 项；再多就是合集或播放列表，先问一句
                 var limit: Int?
                 if count > YtDlpExtractor.askAbove {
@@ -232,11 +282,12 @@ struct YtDlpExtractor: SiteExtractor {
                         got = try await YtDlpExtractor.collect(dir: dir, limit: limit, service: service, onLog: onLog)
                     }
                 }
+                if coverMode == .withVideo, let cover { return got.items + [cover] }
                 return got.items
             }
             // 占位：下载前还不知道每一项是图片还是视频，fetch 之后换成真正的内容
-            let placeholders = Array(repeating: NoteMedia(kind: .video, original: [], fallback: []), count: count)
-            let platform = Self.platformName(r.extractor, host: url.host ?? "")
+            let shown = coverMode == .only ? 1 : count + (coverMode == .withVideo ? 1 : 0)
+            let placeholders = Array(repeating: NoteMedia(kind: .video, original: [], fallback: []), count: shown)
             // 相册名里的 ID：Instagram 用 @ 后面的用户名，其它用 yt-dlp 的 uploader_id（X 是 @ 后面的那个，B 站是 UID）
             let ids = ([r.handle] + r.uploaderIDs).filter { !$0.isEmpty }
             let author: Author? = ids.isEmpty && r.uploader.isEmpty ? nil
@@ -244,7 +295,10 @@ struct YtDlpExtractor: SiteExtractor {
                          primaryID: ids.first ?? "", ids: ids,
                          idLabel: platform == "哔哩哔哩" ? "UID" : "用户 ID")
             return ParsedNote(platform: platform, id: r.id, title: r.title, items: placeholders,
-                              author: author, published: r.published, referer: "", workDir: dir, fetch: fetch)
+                              author: author, published: r.published,
+                              // 只有 B 站封面要再联网下载，带上 B 站自己的来源页
+                              referer: platform == "哔哩哔哩" ? "https://www.bilibili.com/" : "",
+                              workDir: dir, fetch: fetch)
         } catch {
             try? FileManager.default.removeItem(at: dir)
             throw error

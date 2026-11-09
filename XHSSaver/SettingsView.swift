@@ -10,6 +10,7 @@ struct SettingsView: View {
     @AppStorage(Prefs.usePublishDateKey) private var usePublishDate = false
     @AppStorage(Prefs.askAlbumKey) private var askAlbum = true
     @AppStorage(Prefs.maxVideoHeightKey) private var maxVideoHeight = 0
+    @AppStorage(Prefs.biliCoverKey) private var biliCover = Prefs.BiliCover.withVideo.rawValue
     @State private var historyCount = History.count
     @State private var confirmClearHistory = false
     /// 相册命名的两组设置平时很少改，默认收起
@@ -35,6 +36,9 @@ struct SettingsView: View {
                     Picker("其它网站视频清晰度", selection: $maxVideoHeight) {
                         ForEach(Prefs.maxVideoHeightChoices) { c in Text(c.title).tag(c.height) }
                     }
+                    Picker("B 站封面", selection: $biliCover) {
+                        ForEach(Prefs.BiliCover.allCases) { c in Text(c.title).tag(c.rawValue) }
+                    }
                     Toggle("照片日期用作品发布时间", isOn: $usePublishDate)
                     Toggle("保存前选择相册", isOn: $askAlbum)
                     HStack {
@@ -48,7 +52,8 @@ struct SettingsView: View {
                 } footer: {
                     Text("""
                     图片格式：HEIC 是小红书原图本身，体积最小；JPEG / PNG 由小红书服务器从原图转换，分辨率不变。
-                    视频清晰度：用 yt-dlp 下载的网站（B 站、YouTube 等）默认取能拿到的最高清晰度；4K 文件很大，想省空间可以设上限。小红书、抖音、Instagram、X、微博的图片和视频始终取最高的。
+                    视频清晰度：用 yt-dlp 下载的网站（B 站、YouTube 等）默认取能拿到的最高清晰度；4K 文件很大，想省空间可以设上限。小红书、抖音、快手、Instagram、X、微博的图片和视频始终取最高的。
+                    B 站封面：保存 B 站视频时把封面图（原始尺寸）也存进同一个相册；选「只保存封面」就不下载视频。
                     选择相册需要「完整照片访问」权限（要读取已有相册名）：会按作者 ID 找已有相册，找不到就按「作者名字（平台名_作者ID）」新建。
                     下载记录只存平台和作品 ID，保存过的作品再存时会先问你。
                     """)

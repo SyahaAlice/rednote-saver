@@ -227,6 +227,8 @@ def _meta(items, top):
         "handle": g("channel") if key.startswith("Instagram") else None,
         "timestamp": g("timestamp", "release_timestamp"),
         "upload_date": g("upload_date"),
+        # 封面图（B 站的就是原始尺寸的封面）
+        "thumbnail": g("thumbnail"),
     }
 
 

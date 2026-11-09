@@ -91,6 +91,8 @@ enum YtDlp {
         var entryCount: Int
         /// 项数到了 dlcore 的上限（MAX_ENTRIES），后面可能还有没算进来的
         var more: Bool
+        /// 封面图地址（yt-dlp 的 thumbnail）
+        var thumbnail: URL?
     }
     /// 下载好的一项：streams 是它的文件（音视频可能分开）；这一项失败时 streams 为空、error 有说明
     struct Fetched { var streams: [Stream]; var error: String? }
@@ -166,7 +168,7 @@ enum YtDlp {
                     extractor: o["extractor"] as? String ?? "", uploader: o["uploader"] as? String ?? "",
                     uploaderIDs: o["uploader_ids"] as? [String] ?? [], handle: o["handle"] as? String ?? "",
                     published: published, entryCount: o["entries"] as? Int ?? 1,
-                    more: o["more"] as? Bool ?? false)
+                    more: o["more"] as? Bool ?? false, thumbnail: JSONTree.url(o["thumbnail"]))
     }
 
     /// 第二步：下载 probe 解析好的内容（dir 要和 probe 时相同），链接里的每一项都下载；

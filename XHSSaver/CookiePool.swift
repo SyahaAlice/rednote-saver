@@ -8,7 +8,8 @@ enum CookiePool {
     private static var stateFile: URL { folder.appendingPathComponent(".next") }
 
     /// 这些网站先用游客试，失败才用号池账号：小红书大陆账号登录后网页只给压缩视频
-    static let guestFirst: Set<String> = ["xiaohongshu.com"]
+    /// 快手：分享页游客就能看，账号只在游客拿不到时才用
+    static let guestFirst: Set<String> = ["xiaohongshu.com", "kuaishou.com"]
 
     /// 短链 / 别名域名 → 实际网站（rednote.com 算小红书，国内版、海外版账号可以混在一个号池里）
     static let siteAlias: [(String, String)] = [
@@ -18,6 +19,9 @@ enum CookiePool {
         ("twitter.com", "x.com"), ("t.co", "x.com"),
         ("instagr.am", "instagram.com"),
         ("weibo.cn", "weibo.com"), ("t.cn", "weibo.com"),
+        // 快手：短链 v.kuaishou.com、分享页 *.chenzhongtech.com / *.gifshow.com 都算快手
+        ("kuaishou.com", "kuaishou.com"), ("kuaishou.cn", "kuaishou.com"),
+        ("chenzhongtech.com", "kuaishou.com"), ("gifshow.com", "kuaishou.com"),
     ]
 
     static func site(of host: String) -> String {

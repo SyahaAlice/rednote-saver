@@ -140,6 +140,24 @@ enum Prefs {
     }
     static var usePublishDate: Bool { UserDefaults.standard.bool(forKey: usePublishDateKey) }
 
+    /// B 站视频的封面怎么处理
+    enum BiliCover: String, CaseIterable, Identifiable {
+        case withVideo, only, off
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .withVideo: return "和视频一起保存"
+            case .only: return "只保存封面"
+            case .off: return "不保存"
+            }
+        }
+    }
+    static let biliCoverKey = "biliCover"
+    /// 默认和视频一起保存
+    static var biliCover: BiliCover {
+        BiliCover(rawValue: UserDefaults.standard.string(forKey: biliCoverKey) ?? "") ?? .withVideo
+    }
+
     /// yt-dlp 下载视频的清晰度上限（画面高度）；0 = 不限，取网站给的最高清晰度（默认）
     static let maxVideoHeightKey = "maxVideoHeight"
     struct HeightChoice: Identifiable {
