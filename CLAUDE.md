@@ -43,6 +43,7 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 | `cancel` | 保存过程中的「取消」按钮（只在保存时出现） |
 | `phase` | 当前阶段。它的「值」是固定的英文代号：`idle`、`parsing`、`waiting-user`、`downloading`、`saving-3-of-9`、`finished`、`failed`、`cancelled` |
 | `capture-cancel`、`capture-reload` | 内置浏览器读取页（Instagram、X、微博、快手）的「取消」「重新加载」 |
+| `login-status`、`login-reload` | 设置里登录页底部的提示和「重新加载」。`login-status` 的「值」：`logged-in`（浏览器里已有登录 cookie，可以点「完成」）、`not-logged-in`、`unknown` |
 | `preview-save`、`preview-cancel` | 预览页的「保存 N 项」「取消」 |
 | `latest` | 保存过程中「正在做什么」的那一行 |
 | `details` | 「完整过程」，点开是全部日志 |
