@@ -10,6 +10,7 @@ struct SettingsView: View {
     @AppStorage(Prefs.askAlbumKey) private var askAlbum = true
     @State private var historyCount = History.count
     @State private var prefixes = Prefs.albumPrefixes
+    @State private var newPlatform = ""
     @State private var version: YtDlp.Version?
     @State private var versionError = ""
     @State private var updating = false
@@ -58,10 +59,34 @@ struct SettingsView: View {
                                 .frame(maxWidth: 140)
                         }
                     }
+                    HStack {
+                        TextField("添加平台（例如 西瓜视频）", text: $newPlatform)
+                        Button("添加") {
+                            let p = newPlatform.trimmingCharacters(in: .whitespaces)
+                            guard !p.isEmpty else { return }
+                            prefixes[p] = Prefs.idPrefix(for: p)
+                            Prefs.albumPrefixes = prefixes
+                            newPlatform = ""
+                        }
+                        .disabled(newPlatform.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
                 } header: {
                     Text("相册命名：ID 前缀")
                 } footer: {
-                    Text("常规格式：用户名（前缀ID），例如 用户A（xhs_idA）、用户B（x_@idB）、用户D（UID:idD）。没列出来的平台用「平台名_」。")
+                    Text("没列出来的平台自动用小写拼音首字母（西瓜视频 → xgsp_），英文名用小写全名。")
+                }
+
+                Section {
+                    LabeledTemplate(title: "常规", key: Prefs.templateNormalKey, placeholder: Prefs.defaultTemplateNormal)
+                    LabeledTemplate(title: "已注销 / 常删作品", key: Prefs.templateDeletedKey,
+                                    placeholder: Prefs.defaultTemplateDeleted)
+                    LabeledTemplate(title: "多账号之间的分隔", key: Prefs.multiSeparatorKey,
+                                    placeholder: Prefs.defaultMultiSeparator)
+                    TemplatePreview()
+                } header: {
+                    Text("相册命名：模板")
+                } footer: {
+                    Text("可用的占位符：{用户名} {前缀} {ID}。留空就用默认模板。多账号格式 = 常规模板 + 分隔 + 常规模板。")
                 }
 
                 Section {
@@ -241,5 +266,47 @@ struct AddAccountView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
             }
         }
+    }
+}
+
+/// 一行可编辑的命名模板（存进 UserDefaults）
+struct LabeledTemplate: View {
+    let title: String
+    let placeholder: String
+    @AppStorage private var value: String
+
+    init(title: String, key: String, placeholder: String) {
+        self.title = title
+        self.placeholder = placeholder
+        _value = AppStorage(wrappedValue: "", key)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            TextField(placeholder, text: $value)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+    }
+}
+
+/// 模板改动后实时预览三种格式
+struct TemplatePreview: View {
+    @AppStorage(Prefs.templateNormalKey) private var normal = ""
+    @AppStorage(Prefs.templateDeletedKey) private var deleted = ""
+    @AppStorage(Prefs.multiSeparatorKey) private var separator = ""
+
+    var body: some View {
+        // 读一下这三个值，让它们变化时重新渲染
+        let _ = (normal, deleted, separator)
+        VStack(alignment: .leading, spacing: 2) {
+            Text("预览").font(.caption).foregroundStyle(.secondary)
+            Text(Albums.compose(.normal, Albums.Entry(name: "用户A", prefix: "xhs_", id: "idA"), nil))
+            Text(Albums.compose(.multi, Albums.Entry(name: "用户E1", prefix: "dy_", id: "idE1"),
+                                Albums.Entry(name: "用户E2", prefix: "wb_", id: "idE2")))
+            Text(Albums.compose(.deleted, Albums.Entry(name: "用户F", prefix: "ks_", id: "idF"), nil))
+        }
+        .font(.callout)
     }
 }

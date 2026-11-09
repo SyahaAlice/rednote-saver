@@ -69,10 +69,41 @@ enum Prefs {
 
     /// 相册名里 ID 前面的写法（按用户习惯：小红书 xhs_、X x_@、Instagram ins_@、B 站 UID:）
     static let defaultPrefixes: [String: String] = [
-        "小红书": "xhs_", "X": "x_@", "Instagram": "ins_@", "哔哩哔哩": "UID:",
+        "小红书": "xhs_", "抖音": "dy_", "微博": "wb_", "快手": "ks_",
+        "X": "x_@", "Instagram": "ins_@", "哔哩哔哩": "UID:",
     ]
-    /// 设置页里列出来可以改前缀的平台
-    static let prefixPlatforms = ["小红书", "抖音", "X", "Instagram", "哔哩哔哩", "微博", "YouTube", "TikTok"]
+    /// 设置页里列出来可以改前缀的平台（另外加上用户自己添加过的）
+    static let builtinPlatforms = ["小红书", "抖音", "快手", "微博", "哔哩哔哩", "X", "Instagram"]
+    static var prefixPlatforms: [String] {
+        builtinPlatforms + albumPrefixes.keys.filter { !builtinPlatforms.contains($0) }.sorted()
+    }
+
+    // 相册命名模板：{用户名} {前缀} {ID}
+    static let templateNormalKey = "albumTemplateNormal"
+    static let templateDeletedKey = "albumTemplateDeleted"
+    static let multiSeparatorKey = "albumMultiSeparator"
+    static let defaultTemplateNormal = "{用户名}（{前缀}{ID}）"
+    static let defaultTemplateDeleted = "{用户名}【{前缀}{ID}】"
+    static let defaultMultiSeparator = "/"
+    static var templateNormal: String { nonEmpty(templateNormalKey) ?? defaultTemplateNormal }
+    static var templateDeleted: String { nonEmpty(templateDeletedKey) ?? defaultTemplateDeleted }
+    static var multiSeparator: String { nonEmpty(multiSeparatorKey) ?? defaultMultiSeparator }
+    private static func nonEmpty(_ key: String) -> String? {
+        guard let s = UserDefaults.standard.string(forKey: key), !s.isEmpty else { return nil }
+        return s
+    }
+
+    /// 没设置过的平台：中文名取小写拼音首字母（西瓜视频 → xgsp_），英文名取小写全名
+    static func autoPrefix(for platform: String) -> String {
+        if platform.unicodeScalars.allSatisfy({ $0.isASCII }) {
+            return platform.lowercased().replacingOccurrences(of: " ", with: "") + "_"
+        }
+        let m = NSMutableString(string: platform) as CFMutableString
+        CFStringTransform(m, nil, kCFStringTransformToLatin, false)
+        CFStringTransform(m, nil, kCFStringTransformStripDiacritics, false)
+        let initials = (m as String).split(separator: " ").compactMap { $0.first.map { String($0).lowercased() } }
+        return initials.joined() + "_"
+    }
 
     static var albumPrefixes: [String: String] {
         get { UserDefaults.standard.dictionary(forKey: albumPrefixesKey) as? [String: String] ?? [:] }
@@ -81,7 +112,7 @@ enum Prefs {
 
     /// 没设置过的平台用「平台名_」
     static func idPrefix(for platform: String) -> String {
-        albumPrefixes[platform] ?? defaultPrefixes[platform] ?? "\(platform)_"
+        albumPrefixes[platform] ?? defaultPrefixes[platform] ?? autoPrefix(for: platform)
     }
 
     static var imageFormat: ImageFormat {

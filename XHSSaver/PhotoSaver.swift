@@ -102,17 +102,26 @@ enum Albums {
         }
     }
 
+    /// 按模板填空：{用户名} {前缀} {ID}（模板在「设置 → 相册命名」里可改）
+    static func fill(_ template: String, _ e: Entry) -> String {
+        var id = e.id.trimmingCharacters(in: .whitespaces)
+        if e.prefix.hasSuffix("@"), id.hasPrefix("@") { id.removeFirst() }
+        return template.replacingOccurrences(of: "{用户名}", with: e.name)
+            .replacingOccurrences(of: "{前缀}", with: e.prefix)
+            .replacingOccurrences(of: "{ID}", with: id)
+    }
+
     /// 常规：用户A（xhs_idA）；多平台：用户E1（平台1_idE1）/用户E2（平台2_idE2）；已注销：用户F【平台_idF】
     static func compose(_ style: Style, _ first: Entry, _ second: Entry?) -> String {
         switch style {
         case .normal:
-            return "\(first.name)（\(first.tag)）"
+            return fill(Prefs.templateNormal, first)
         case .deleted:
-            return "\(first.name)【\(first.tag)】"
+            return fill(Prefs.templateDeleted, first)
         case .multi:
-            let a = "\(first.name)（\(first.tag)）"
+            let a = fill(Prefs.templateNormal, first)
             guard let second, !(second.name.isEmpty && second.id.isEmpty) else { return a }
-            return a + "/\(second.name)（\(second.tag)）"
+            return a + Prefs.multiSeparator + fill(Prefs.templateNormal, second)
         }
     }
 
