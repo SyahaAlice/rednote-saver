@@ -36,9 +36,12 @@ struct SitePreset: Identifiable {
         SitePreset(title: "Instagram", site: "instagram.com", loginURL: "https://www.instagram.com/accounts/login/"),
         SitePreset(title: "X", site: "x.com", loginURL: "https://x.com/i/flow/login"),
         // 快手：www.kuaishou.com 用手机浏览器打开会被带去 m.kuaishou.com（只有「打开 App」，不能登录），
-        // 所以用它的登录页本身，并请求桌面网站
+        // 所以用它的登录页本身，并请求桌面网站。
+        // sid 必须是快手网页版自己用的 kuaishou.server.webday7；不要带 callback 参数：
+        // 登录页只接受白名单里的回跳地址，随便填会在登录成功后报「跳转地址不合法」。
+        // 不带时它用服务器给的回跳地址，登录完再去 redirectURL
         SitePreset(title: "快手", site: "kuaishou.com", loginURL:
-            "https://passport.kuaishou.com/pc/account/login/?sid=kuaishou.server.web&callback=https%3A%2F%2Fwww.kuaishou.com%2F",
+            "https://passport.kuaishou.com/pc/account/login/?sid=kuaishou.server.webday7&redirectURL=https%3A%2F%2Fwww.kuaishou.com%2F",
                    desktop: true),
     ]
 }
