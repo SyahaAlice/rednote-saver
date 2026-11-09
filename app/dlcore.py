@@ -162,7 +162,37 @@ def _opts(a, log, cancel, ck, out_dir=None):
     }
     if ck:
         opts["cookiefile"] = ck
+    if a.get("generic") is False:
+        # 不用 yt-dlp 的「通用」兜底（它会把任何网页都当成可能有视频去试）：不认识的网站直接报不支持
+        opts["allowed_extractors"] = ["default", "-generic"]
     return opts
+
+
+def supports(args_json):
+    """这个网址有没有专门的提取器（不联网，只看网址的样子）。
+    参数：url, gdl_zip
+    返回：{"ytdlp": yt-dlp 里认它的提取器名字或 null, "gallery": gallery-dl 里的名字或 null}
+    两个都是 null = 不支持的网站。yt-dlp 的「通用」提取器不算：它对任何网址都说行"""
+    a = json.loads(args_json)
+    url = a["url"]
+    out = {"ytdlp": None, "gallery": None}
+    try:
+        from yt_dlp.extractor import gen_extractor_classes
+        for ie in gen_extractor_classes():
+            if ie.ie_key() != "Generic" and ie.suitable(url):
+                out["ytdlp"] = ie.IE_NAME
+                break
+    except Exception as e:
+        out["ytdlp_error"] = f"{type(e).__name__}: {e}"
+    try:
+        _gdl_path(a.get("gdl_zip"))
+        from gallery_dl import extractor
+        found = extractor.find(url)
+        if found is not None:
+            out["gallery"] = getattr(found, "category", None) or "gallery-dl"
+    except Exception as e:
+        out["gallery_error"] = f"{type(e).__name__}: {e}"
+    return json.dumps(out, ensure_ascii=False)
 
 
 def _strip(info):
@@ -291,7 +321,8 @@ def probe(args_json):
     """第一步：只解析。
     参数：url, out_dir, cookies（按顺序尝试的 cookies 文件列表，null 表示游客）, log, cache_dir, cancel,
           max_height（清晰度上限，0 = 不限）, max_entries（一个链接最多几项，0 = 不限）,
-          format（直接指定 yt-dlp 的格式串，一般不用）
+          format（直接指定 yt-dlp 的格式串，一般不用）,
+          generic（false = 不用 yt-dlp 的通用兜底，不认识的网站直接报错；App 里固定传 false）
     返回：{"ok": true, "id", "title", "extractor", "uploader", ...,
            "entries": 链接里的项数, "more": 是否可能还有超出 MAX_ENTRIES 的没算进来,
            "heights": 可选的清晰度（画面高度，从高到低）,

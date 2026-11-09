@@ -11,6 +11,7 @@
 - 一个链接里的多项全部下载，各放各的子文件夹；limit 只下前几项
 - 某一项失败不影响其它项
 - 清晰度：probe 列出可选清晰度和每一档的下载地址；fetch 可以换清晰度
+- 支持的网站：supports 只认有专门提取器的网址；关掉通用兜底后不认识的网站直接失败
 - 取消：下载前、下载途中都返回 cancelled
 - 解析失败时错误原样返回
 - gallery-dl（装了才测）：只列出不下载、不支持的网址交还给 yt-dlp、微博实况图配对、不过滤内容
@@ -188,6 +189,26 @@ check("每种清晰度各自的下载地址", links.get("0") == [["http://exampl
       and links.get("1080") == [["http://example.invalid/avc1080", "http://example.invalid/m4a"]]
       and links.get("720") == [["http://example.invalid/avc720", "http://example.invalid/m4a"]], links)
 
+print("支持的网站")
+
+
+def supports(url):
+    return json.loads(dlcore.supports(json.dumps({"url": url})))
+
+
+r = supports("https://www.bilibili.com/video/BV13x41117TL")
+check("B 站视频：yt-dlp 认", bool(r.get("ytdlp")), r)
+r = supports("https://www.youtube.com/watch?v=LXb3EKWsInQ")
+check("YouTube：yt-dlp 认", bool(r.get("ytdlp")), r)
+r = supports("https://example.com/some/page.html")
+check("不认识的网站：两个都不认（通用提取器不算）", not r.get("ytdlp") and not r.get("gallery"), r)
+d = tempfile.mkdtemp()
+r = json.loads(dlcore.probe(json.dumps({
+    "url": BASE + "two.html", "out_dir": d, "cookies": [None], "log": os.path.join(d, "probe.log"),
+    "cache_dir": None, "cancel": os.path.join(d, "cancel"), "max_height": 0, "generic": False})))
+check("关掉通用兜底：不认识的网站 probe 直接失败", r.get("ok") is False and not r.get("cancelled"), r)
+shutil.rmtree(d)
+
 print("取消")
 d = tempfile.mkdtemp()
 probe(d, "two.html")
@@ -265,6 +286,10 @@ if HAVE_GDL:
               "https://m.weibo.cn/status/4912345678901234": "weibo", "https://www.pixiv.net/artworks/123": "pixiv"}
     got = {u: getattr(gdl_extractor.find(u), "category", None) for u in routes}
     check("X、微博、Pixiv 的帖子链接能认出来", got == routes, got)
+    r = supports("https://x.com/user/status/1234567890")
+    check("supports：X 的帖子 gallery-dl 认", r.get("gallery") == "twitter", r)
+    r = supports("https://files.example/video.mp4")
+    check("supports：直接指向文件的链接算支持（gallery-dl 的直链）", bool(r.get("gallery")), r)
     # 实况图配对和内容不过滤的开关：不联网，直接检查整理结果和配置
     from gallery_dl import config as gdl_config
 

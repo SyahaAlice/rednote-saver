@@ -79,6 +79,22 @@ enum YtDlp {
         return try await version()
     }
 
+    /// 这个网址有没有专门的提取器（不联网，只看网址的样子）
+    struct Support {
+        var ytdlp: Bool
+        var gallery: Bool
+        var any: Bool { ytdlp || gallery }
+    }
+
+    static func supports(_ url: URL) async -> Support {
+        guard let s = try? await call("supports", json(["url": url.absoluteString, "gdl_zip": galleryZip.path])),
+              let o = try? object(s) else {
+            // 连判断都跑不起来（Python 出了问题）：不在这里拦，让后面的解析把真正的错误报出来
+            return Support(ytdlp: true, gallery: true)
+        }
+        return Support(ytdlp: o["ytdlp"] is String, gallery: o["gallery"] is String)
+    }
+
     struct Stream { var path: URL; var hasVideo: Bool; var hasAudio: Bool }
     /// 解析结果（还没下载）
     struct Info {
@@ -163,6 +179,7 @@ enum YtDlp {
             "cancel": cancelFlag(in: dir).path,
             "max_height": maxHeight,
             "max_entries": 0,  // 不设上限：预览页里可以勾选要哪些
+            "generic": false,  // 不认识的网站直接报不支持，不拿「通用」提取器去试
         ], dir: dir, log: log, onLog: onLog)
 
         var published = (o["timestamp"] as? Double).map { Date(timeIntervalSince1970: $0) }

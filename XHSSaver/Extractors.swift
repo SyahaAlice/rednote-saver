@@ -267,12 +267,46 @@ struct GenericExtractor: SiteExtractor {
     /// 这些网站不走 gallery-dl：Instagram 用它容易触发验证，这里到的是帖子以外的链接（主页、快拍），交给 yt-dlp
     static let skipGallery: Set<String> = ["instagram.com"]
 
+    /// 跟着跳转走到底，返回最后的网址（短链用；失败返回 nil）
+    private static func followRedirects(_ url: URL) async -> URL? {
+        for method in ["HEAD", "GET"] {
+            var req = URLRequest(url: url, timeoutInterval: 15)
+            req.httpMethod = method
+            req.setValue(NoteParser.mobileUA, forHTTPHeaderField: "User-Agent")
+            if let (_, resp) = try? await URLSession.shared.data(for: req), let final = resp.url, final != url {
+                return final
+            }
+        }
+        return nil
+    }
+
     func extract(_ url: URL, service: SaveService) async throws -> ParsedNote {
-        if !Self.skipGallery.contains(CookiePool.site(of: url.host ?? "")),
-           let note = try await galleryNote(url, service: service) {
+        // 先验证：只有 yt-dlp 或 gallery-dl 里有专门提取器的网站才去解析，其它的直接报错
+        var target = url
+        var known = await YtDlp.supports(target)
+        if !known.any {
+            // 可能是短链（比如 b23.tv）：跟过去看最后落在哪个网站
+            service.say("不认识这个网址，看看它跳转到哪里…", detail: true)
+            if let final = await Self.followRedirects(url) {
+                try Task.checkCancellation()
+                service.say("跳转到：\(final.host ?? final.absoluteString)", detail: true)
+                let picked = Extractors.pick(for: final)
+                if !(picked is GenericExtractor) { return try await picked.extract(final, service: service) }
+                target = final
+                known = await YtDlp.supports(final)
+            }
+        }
+        guard known.any else {
+            throw XHSError("不支持这个网站：\(target.host ?? target.absoluteString)")
+        }
+        if known.gallery, !Self.skipGallery.contains(CookiePool.site(of: target.host ?? "")),
+           let note = try await galleryNote(target, service: service) {
             return note
         }
-        return try await YtDlpExtractor().extract(url, service: service)
+        guard known.ytdlp else {
+            throw XHSError("没有解析到可以保存的图片或视频（细节在「过程」里）")
+        }
+        return try await YtDlpExtractor().extract(target, service: service)
     }
 }
 

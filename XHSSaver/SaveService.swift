@@ -289,6 +289,11 @@ final class SaveService: ObservableObject {
         let note = try await Extractors.pick(for: url).extract(url, service: self)
         defer { if let d = note.workDir { try? FileManager.default.removeItem(at: d) } }
         try checkCancelled()
+        // 验证：确实解析到了能保存的东西，才进入预览、选相册这些步骤
+        let usable = note.fetch != nil || note.items.contains {
+            $0.error == nil && (!$0.original.isEmpty || !$0.fallback.isEmpty || $0.localFile != nil)
+        }
+        guard usable else { throw XHSError("没有解析到可以保存的图片或视频") }
         return try await save(note, mode: mode)
     }
 
