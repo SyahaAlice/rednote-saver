@@ -86,7 +86,7 @@ struct SettingsView: View {
                 } header: {
                     Label("相册命名：模板", systemImage: "textformat")
                 } footer: {
-                    Text("可用的占位符：{用户名} {前缀} {ID}。留空就用默认模板。多账号格式 = 常规模板 + 分隔 + 常规模板。")
+                    Text("可用的占位符：{用户名} {前缀} {ID}。留空就用默认模板。多个账号时每个账号套一次模板，同一平台的排在一起，中间用分隔符。")
                 }
 
                 Section {
@@ -304,10 +304,11 @@ struct TemplatePreview: View {
         let _ = (normal, deleted, separator)
         VStack(alignment: .leading, spacing: 2) {
             Text("预览").font(.caption).foregroundStyle(.secondary)
-            Text(Albums.compose(.normal, Albums.Entry(name: "用户A", prefix: "xhs_", id: "idA"), nil))
-            Text(Albums.compose(.multi, Albums.Entry(name: "用户E1", prefix: "dy_", id: "idE1"),
-                                Albums.Entry(name: "用户E2", prefix: "wb_", id: "idE2")))
-            Text(Albums.compose(.deleted, Albums.Entry(name: "用户F", prefix: "ks_", id: "idF"), nil))
+            Text(Albums.compose(.normal, [Albums.Entry(platform: "小红书", name: "用户A", id: "idA")]))
+            Text(Albums.compose(.normal, [Albums.Entry(platform: "抖音", name: "用户E1", id: "idE1"),
+                                          Albums.Entry(platform: "微博", name: "用户E2", id: "idE2"),
+                                          Albums.Entry(platform: "抖音", name: "", id: "idE3")]))
+            Text(Albums.compose(.deleted, [Albums.Entry(platform: "快手", name: "用户F", id: "idF")]))
         }
         .font(.callout)
     }
