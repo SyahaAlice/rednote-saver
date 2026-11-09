@@ -6,7 +6,8 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 ## 怎么验证
 
 - **Swift 只能在 GitHub Actions 上编译**（macOS）。推送到 main → 自动编译（约 5 分钟）→ 成功后覆盖 release「latest」的 `XHSSaver.ipa`。编译错误会成为运行页面上的注释。
-- **`app/dlcore.py` 可以在任何电脑上测**：`python tools/test_dlcore.py`（需要 `pip install yt-dlp`；不访问外网）。CI 也会跑，不通过不发布。
+- **`app/dlcore.py` 可以在任何电脑上测**：`python tools/test_dlcore.py`（需要 `pip install yt-dlp gallery-dl`；不访问外网）。CI 也会跑，不通过不发布。
+- 打进安装包的 Python 库必须是纯 Python（iOS 上加载不了编译好的模块），CI 会检查。
 - **解析逻辑的原型**：`tools/parse_proto.py`、`tools/douyin_proto.py` 可以离线检查保存下来的网页。
 - 真机上的效果只有装到手机上才能确认。没验证过的东西在汇报时要明说。
 
@@ -21,6 +22,7 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 ## 不能做的事
 
 - 不用第三方合成模块，不依赖别人的服务器。
+- **不加内容审查类的功能和预期之外的限制**：不按内容类型、敏感标记、年龄分级筛选或拦截，不设网站黑名单，不悄悄丢掉或截断内容。yt-dlp、gallery-dl 里默认会跳过内容的选项要关掉。确实需要的技术性上限要做成设置、能改成不限，并写进 architecture.md 的「不过滤内容」一节。
 - 不伪造签名、不伪装浏览器、不绕过风控。需要登录的网站只走「用户自己登录的内置浏览器 + 复制网页自己拿到的数据」。
 - cookie 绝不能进仓库或安装包（仓库和 ipa 都是公开的），也不要打印 cookie 的值。
 - 不改这些默认行为：小红书游客优先、默认 HEIC 原图、发布时间开关默认关、保存前选相册默认开。

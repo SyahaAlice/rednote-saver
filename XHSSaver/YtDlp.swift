@@ -1,6 +1,8 @@
+import CryptoKit
 import Foundation
 
-/// 内嵌 Python 上的 yt-dlp（app/dlcore.py）。所有 Python 调用都排在同一个串行队列里。
+/// 内嵌 Python 上的 yt-dlp 和 gallery-dl（app/dlcore.py）。所有 Python 调用都排在同一个串行队列里。
+/// yt-dlp 管视频（选格式、下载）；gallery-dl 管图片和图文混排（只列出内容，由 App 自己下载）。
 enum YtDlp {
     private static let queue = DispatchQueue(label: "python", qos: .userInitiated)
 
@@ -131,6 +133,7 @@ enum YtDlp {
         watcher.cancel()
         _ = await drain(log, from: await watcher.value, onLog)
         let o = try object(try outcome.get())
+        if o["unsupported"] as? Bool == true { return o }  // 不是出错：这个网址这个提取器不管，交还给调用方
         guard o["ok"] as? Bool == true else {
             let message = o["error"] as? String ?? "未知错误"
             if o["cancelled"] as? Bool == true { throw XHSError.cancelled }
@@ -155,6 +158,7 @@ enum YtDlp {
             "cache_dir": cache,
             "cancel": cancelFlag(in: dir).path,
             "max_height": maxHeight,
+            "max_entries": Prefs.maxEntries,
         ], dir: dir, log: log, onLog: onLog)
 
         var published = (o["timestamp"] as? Double).map { Date(timeIntervalSince1970: $0) }
@@ -191,5 +195,110 @@ enum YtDlp {
         }
         if items.isEmpty { throw XHSError("下载失败：没有得到文件") }
         return items
+    }
+
+    // MARK: - gallery-dl：列出帖子里的全部图片和视频（图文混排）
+
+    /// App 里更新下来的 gallery-dl（PyPI 上的 wheel，本身就是 zip），存在就优先用它
+    static var galleryZip: URL {
+        CookiePool.documents.appendingPathComponent("ytdlp/gallery-dl.zip")
+    }
+    static let galleryIndexURL = URL(string: "https://pypi.org/pypi/gallery-dl/json")!
+
+    struct GalleryItem {
+        /// image / video / live
+        var kind: String
+        var url: URL
+        /// 实况图的动态视频（kind == live 时有）
+        var live: URL?
+        /// 备用地址（较小的尺寸），用之前要先问用户
+        var fallback: [URL]
+        /// gallery-dl 自己不直接下载、要交给 yt-dlp 的分段视频
+        var needsYtDlp: Bool
+    }
+    struct Gallery {
+        var info: Info
+        var items: [GalleryItem]
+        /// 下载这些文件时带的 Referer
+        var referer: String
+    }
+
+    /// 用 gallery-dl 列出链接里的全部内容（不下载）。返回 nil = 这个网址 gallery-dl 不支持
+    static func gallery(url: URL, into dir: URL, cookies: [URL?],
+                        onLog: @escaping @MainActor (String) -> Void) async throws -> Gallery? {
+        let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("gallery-dl")
+        try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let log = dir.appendingPathComponent("gallery-\(UUID().uuidString.prefix(8)).log")
+        let o = try await logged("gallery", [
+            "url": url.absoluteString,
+            "cookies": cookies.map { (c: URL?) -> Any in c.map { $0.path as Any } ?? NSNull() },
+            "log": log.path,
+            "cache_dir": cache.path,
+            "cancel": cancelFlag(in: dir).path,
+            "gdl_zip": galleryZip.path,
+            "max_entries": Prefs.maxEntries,
+        ], dir: dir, log: log, onLog: onLog)
+        if o["unsupported"] as? Bool == true { return nil }
+
+        let items = (o["items"] as? [[String: Any]] ?? []).compactMap { d -> GalleryItem? in
+            guard let u = JSONTree.url(d["url"]) else { return nil }
+            return GalleryItem(kind: d["kind"] as? String ?? "image", url: u, live: JSONTree.url(d["live"]),
+                               fallback: (d["fallback"] as? [String] ?? []).compactMap { JSONTree.url($0) },
+                               needsYtDlp: d["ytdl"] as? Bool ?? false)
+        }
+        let info = Info(id: o["id"] as? String ?? url.absoluteString, title: o["title"] as? String ?? "",
+                        extractor: o["extractor"] as? String ?? "", uploader: o["uploader"] as? String ?? "",
+                        uploaderIDs: o["uploader_ids"] as? [String] ?? [], handle: o["handle"] as? String ?? "",
+                        published: (o["timestamp"] as? Double).map { Date(timeIntervalSince1970: $0) },
+                        entryCount: items.count, more: o["more"] as? Bool ?? false, thumbnail: nil)
+        return Gallery(info: info, items: items, referer: o["referer"] as? String ?? "")
+    }
+
+    struct GalleryVersion { var version: String; var updated: Bool }
+
+    static func galleryVersion() async throws -> GalleryVersion {
+        let o = try object(try await call("gdl_version", json(["gdl_zip": galleryZip.path])))
+        return GalleryVersion(version: o["gallery_dl"] as? String ?? "?",
+                              updated: (o["source"] as? String ?? "").hasSuffix("gallery-dl.zip"))
+    }
+
+    private static func reloadGallery() async throws -> GalleryVersion {
+        _ = try await call("gdl_reload", json(["gdl_zip": galleryZip.path]))
+        return try await galleryVersion()
+    }
+
+    /// 从 PyPI（Python 官方软件源）下载最新版 gallery-dl 替换内置版本，不用重新安装 App。
+    /// 下载后按软件源给出的 SHA-256 校验，对不上就不替换
+    static func updateGalleryToLatest() async throws -> GalleryVersion {
+        var req = URLRequest(url: galleryIndexURL, timeoutInterval: 30)
+        req.setValue("MediaDownloader", forHTTPHeaderField: "User-Agent")
+        let (indexData, indexResp) = try await URLSession.shared.data(for: req)
+        guard (indexResp as? HTTPURLResponse)?.statusCode == 200,
+              let index = try JSONSerialization.jsonObject(with: indexData) as? [String: Any],
+              let files = index["urls"] as? [[String: Any]],
+              let wheel = files.first(where: { ($0["packagetype"] as? String) == "bdist_wheel" }),
+              let wheelURL = JSONTree.url(wheel["url"]),
+              let expected = (wheel["digests"] as? [String: Any])?["sha256"] as? String else {
+            throw XHSError("读取 gallery-dl 的版本信息失败")
+        }
+        var download = URLRequest(url: wheelURL, timeoutInterval: 120)
+        download.setValue("MediaDownloader", forHTTPHeaderField: "User-Agent")
+        let (tmp, resp) = try await URLSession.shared.download(for: download)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw XHSError("下载 gallery-dl 失败") }
+        let digest = SHA256.hash(data: try Data(contentsOf: tmp)).map { String(format: "%02x", $0) }.joined()
+        guard digest == expected.lowercased() else { throw XHSError("下载到的 gallery-dl 校验不通过，没有替换") }
+        let fm = FileManager.default
+        try fm.createDirectory(at: galleryZip.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? fm.removeItem(at: galleryZip)
+        try fm.copyItem(at: tmp, to: galleryZip)
+        return try await reloadGallery()
+    }
+
+    /// 删除更新版，回到安装包里自带的 gallery-dl
+    static func resetGalleryToBundled() async throws -> GalleryVersion {
+        try? FileManager.default.removeItem(at: galleryZip)
+        return try await reloadGallery()
     }
 }

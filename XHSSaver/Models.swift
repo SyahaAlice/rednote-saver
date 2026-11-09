@@ -158,6 +158,16 @@ enum Prefs {
         BiliCover(rawValue: UserDefaults.standard.string(forKey: biliCoverKey) ?? "") ?? .withVideo
     }
 
+    /// 一个链接最多保存多少项（主页、合集这类链接用得上）；0 = 不限。默认 100
+    static let maxEntriesKey = "maxEntries"
+    static let maxEntriesChoices = [
+        HeightChoice(height: 100, title: "100 项"), HeightChoice(height: 500, title: "500 项"),
+        HeightChoice(height: 2000, title: "2000 项"), HeightChoice(height: 0, title: "不限"),
+    ]
+    static var maxEntries: Int {
+        (UserDefaults.standard.object(forKey: maxEntriesKey) as? Int).map { max(0, $0) } ?? 100
+    }
+
     /// yt-dlp 下载视频的清晰度上限（画面高度）；0 = 不限，取网站给的最高清晰度（默认）
     static let maxVideoHeightKey = "maxVideoHeight"
     struct HeightChoice: Identifiable {

@@ -3,7 +3,7 @@
 
 用法（需要能 import yt_dlp；CI 里 yt-dlp 装在 app_packages/）：
     python tools/test_dlcore.py                 # yt_dlp 已经装在当前 Python 里
-    python tools/test_dlcore.py app_packages    # 指定 yt-dlp 所在的文件夹
+    python tools/test_dlcore.py app_packages    # 指定 yt-dlp（和 gallery-dl）所在的文件夹
 
 覆盖的行为（App 的 Swift 端依赖这些约定，改 dlcore.py 之后务必跑一遍）：
 - 选格式：清晰度优先，同清晰度选 H.264，只有更高清时才用 HEVC；上限生效；VP9 / AV1 只做最后退路
@@ -12,6 +12,7 @@
 - 某一项失败不影响其它项
 - 取消：下载前、下载途中都返回 cancelled
 - 解析失败时错误原样返回
+- gallery-dl（装了才测）：只列出不下载、不支持的网址交还给 yt-dlp、微博实况图配对、不过滤内容
 """
 import functools
 import http.server
@@ -196,6 +197,74 @@ d = tempfile.mkdtemp()
 r = probe(d, "nothing-here.mp4")
 check("链接不存在：错误原样返回，不算取消", r.get("ok") is False and "404" in r.get("error", "") and not r.get("cancelled"), r)
 shutil.rmtree(d)
+
+# ---------------------------------------------------------------- gallery-dl
+
+try:
+    import gallery_dl  # noqa: F401
+    HAVE_GDL = True
+except ImportError:
+    HAVE_GDL = False
+
+if HAVE_GDL:
+    print("gallery-dl")
+    with open(os.path.join(site, "pic.jpg"), "wb") as f:
+        f.write(os.urandom(2000))
+    d = tempfile.mkdtemp()
+
+    def gallery(url):
+        return json.loads(dlcore.gallery(json.dumps({
+            "url": url, "cookies": [None], "log": os.path.join(d, "gallery.log"), "cache_dir": d,
+            "cancel": os.path.join(d, "cancel")})))
+
+    r = json.loads(dlcore.gdl_version("{}"))
+    check("能读到 gallery-dl 版本", bool(r.get("gallery_dl")), r)
+    r = gallery(BASE + "pic.jpg")
+    it = (r.get("items") or [{}])[0]
+    check("直接指向图片的链接：列出 1 项图片，不下载", r.get("ok") and r.get("entries") == 1
+          and it.get("kind") == "image" and it.get("url") == BASE + "pic.jpg" and it.get("ytdl") is False, r)
+    check("没有作品 ID 时用网址查重", r.get("id") == BASE + "pic.jpg", r.get("id"))
+    check("结果的字段和 probe 对得上", all(k in r for k in ("title", "extractor", "uploader", "uploader_ids", "handle", "timestamp", "more", "referer")), r)
+    r = gallery(BASE + "two.html")
+    check("不支持的网址：返回 unsupported，不算出错", r.get("ok") is False and r.get("unsupported") is True, r)
+    check("视频网站交给 yt-dlp（gallery-dl 说不支持）",
+          gallery("https://www.youtube.com/watch?v=abc").get("unsupported") is True
+          and gallery("https://www.bilibili.com/video/BV1xx411c7mD").get("unsupported") is True)
+    from gallery_dl import extractor as gdl_extractor
+    routes = {"https://x.com/user/status/1234567890": "twitter", "https://weibo.com/1234567890/AbCdEfGhI": "weibo",
+              "https://m.weibo.cn/status/4912345678901234": "weibo", "https://www.pixiv.net/artworks/123": "pixiv"}
+    got = {u: getattr(gdl_extractor.find(u), "category", None) for u in routes}
+    check("X、微博、Pixiv 的帖子链接能认出来", got == routes, got)
+    # 实况图配对和内容不过滤的开关：不联网，直接检查整理结果和配置
+    from gallery_dl import config as gdl_config
+
+    class FakeJob:
+        data_urls = ["https://img.example/1.jpg", "https://video.example/1?livephoto=x.mov", "https://img.example/2.jpg",
+                     "ytdl:https://video.example/3.m3u8"]
+        data_meta = [{"extension": "jpg", "type": "livephoto", "_fallback": iter(["https://img.example/1-large.jpg"])},
+                     {"extension": "mov", "type": "livephoto"}, {"extension": "jpg", "type": "pic"},
+                     {"extension": "mp4"}]
+
+    items = dlcore._gdl_items(FakeJob)
+    check("微博实况图：图片和它的动态视频合成一项", [i["kind"] for i in items] == ["live", "image", "video"]
+          and items[0].get("live") == FakeJob.data_urls[1], items)
+    check("备用地址保留；分段视频标成要交给 yt-dlp", items[0]["fallback"] == ["https://img.example/1-large.jpg"]
+          and items[2]["ytdl"] is True and items[2]["url"] == "https://video.example/3.m3u8", items)
+    check("上限：没传用默认 100，传 0 是不限，传别的数照用",
+          dlcore._limit({}) == 100 and dlcore._limit({"max_entries": 0}) is None and dlcore._limit({"max_entries": 500}) == 500)
+    dlcore._gdl_setup({"cache_dir": d, "max_entries": 0}, None)
+    check("不限时 gallery-dl 不设范围", gdl_config.get(("extractor",), "image-range") is None)
+    dlcore._gdl_setup({"cache_dir": d}, None)
+    check("不过滤内容：被标成不可用的媒体、转发、微博电影类视频都不跳过",
+          gdl_config.get(("extractor", "twitter"), "unavailable") is True
+          and gdl_config.get(("extractor", "twitter"), "retweets") is True
+          and gdl_config.get(("extractor", "weibo"), "retweets") == "original"
+          and gdl_config.get(("extractor", "weibo"), "movies") is True)
+    check("没有设置任何按内容筛选的规则", not any(
+        gdl_config.get(("extractor",), k) for k in ("image-filter", "post-filter", "chapter-filter", "blacklist", "whitelist")))
+    shutil.rmtree(d, ignore_errors=True)
+else:
+    print("gallery-dl 没有安装，跳过它的测试")
 
 srv.shutdown()
 shutil.rmtree(site)

@@ -40,11 +40,15 @@ jobs:
           tar -xzf py.tar.gz Python.xcframework
           rm py.tar.gz
 
-      - name: Install yt-dlp and certifi into app_packages
+      - name: Install yt-dlp, gallery-dl and certifi into app_packages
         run: |
-          python -m pip install --no-deps --target app_packages yt-dlp certifi
+          # gallery-dl 需要 requests（以及它依赖的 urllib3、idna），都是纯 Python。
+          # 不装 charset-normalizer：它带编译好的模块，iOS 上用不了，requests 没有它也能工作
+          python -m pip install --no-deps --target app_packages yt-dlp certifi gallery-dl requests urllib3 idna
+          rm -rf app_packages/bin app_packages/share
+          python -c "import sys; sys.path.insert(0, 'app_packages'); import gallery_dl.version as v; print('gallery-dl', v.__version__)"
           python -c "import sys; sys.path.insert(0, 'app_packages'); import yt_dlp; print('yt-dlp', yt_dlp.version.__version__)"
-          # 用这次要打进包里的 yt-dlp 跑一遍 dlcore.py 的离线测试（选格式、多项下载、取消），不通过就不发布
+          # 用这次要打进包里的 yt-dlp 和 gallery-dl 跑一遍 dlcore.py 的离线测试，不通过就不发布
           python -B tools/test_dlcore.py app_packages
           # 预编译 .pyc（与手机上的 Python 3.13 同一版本），加快启动
           # 先删掉标准库里用不到的目录（test 里有故意写错语法的文件，会让预编译报错）
@@ -82,6 +86,12 @@ jobs:
           test -f "$APP/python/lib/python3.13/os.py" || { echo "::error::Python 标准库没有安装"; missing=1; }
           test -f "$APP/app/dlcore.py" || { echo "::error::dlcore.py 没有打包"; missing=1; }
           test -d "$APP/app_packages/yt_dlp" || { echo "::error::yt-dlp 没有打包"; missing=1; }
+          test -d "$APP/app_packages/gallery_dl" || { echo "::error::gallery-dl 没有打包"; missing=1; }
+          test -d "$APP/app_packages/requests" || { echo "::error::requests 没有打包"; missing=1; }
+          # 打进包里的 Python 库不能带编译好的模块（iOS 上加载不了）
+          if find "$APP/app_packages" -name "*.so" -o -name "*.dylib" | grep -q .; then
+            echo "::error::app_packages 里有编译好的模块：$(find "$APP/app_packages" -name '*.so' -o -name '*.dylib' | head -3 | tr '\n' ' ')"; missing=1
+          fi
           test -d "$APP/Metadata.appintents" || echo "::warning::没有生成 App Intents 元数据"
           echo "Frameworks: $(ls "$APP/Frameworks" | wc -l)"
           du -sh "$APP"

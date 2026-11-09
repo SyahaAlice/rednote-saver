@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage(Prefs.askAlbumKey) private var askAlbum = true
     @AppStorage(Prefs.maxVideoHeightKey) private var maxVideoHeight = 0
     @AppStorage(Prefs.biliCoverKey) private var biliCover = Prefs.BiliCover.withVideo.rawValue
+    @AppStorage(Prefs.maxEntriesKey) private var maxEntries = 100
     @State private var historyCount = History.count
     @State private var confirmClearHistory = false
     /// 相册命名的两组设置平时很少改，默认收起
@@ -23,6 +24,9 @@ struct SettingsView: View {
     @State private var version: YtDlp.Version?
     @State private var versionError = ""
     @State private var updating = false
+    @State private var gallery: YtDlp.GalleryVersion?
+    @State private var galleryError = ""
+    @State private var updatingGallery = false
 
     private var bundleID: String { Bundle.main.bundleIdentifier ?? "?" }
 
@@ -35,6 +39,9 @@ struct SettingsView: View {
                     }
                     Picker("其它网站视频清晰度", selection: $maxVideoHeight) {
                         ForEach(Prefs.maxVideoHeightChoices) { c in Text(c.title).tag(c.height) }
+                    }
+                    Picker("一个链接最多保存", selection: $maxEntries) {
+                        ForEach(Prefs.maxEntriesChoices) { c in Text(c.title).tag(c.height) }
                     }
                     Picker("B 站封面", selection: $biliCover) {
                         ForEach(Prefs.BiliCover.allCases) { c in Text(c.title).tag(c.rawValue) }
@@ -53,6 +60,7 @@ struct SettingsView: View {
                     Text("""
                     图片格式：HEIC 是小红书原图本身，体积最小；JPEG / PNG 由小红书服务器从原图转换，分辨率不变。
                     视频清晰度：用 yt-dlp 下载的网站（B 站、YouTube 等）默认取能拿到的最高清晰度；4K 文件很大，想省空间可以设上限。小红书、抖音、快手、Instagram、X、微博的图片和视频始终取最高的。
+                    一个链接最多保存：只对主页、合集、播放列表这类一个链接里有很多作品的情况起作用，超过 20 项时还会先问你；选「不限」就没有上限。
                     B 站封面：保存 B 站视频时把封面图（原始尺寸）也存进同一个相册；选「只保存封面」就不下载视频。
                     选择相册需要「完整照片访问」权限（要读取已有相册名）：会按作者 ID 找已有相册，找不到就按「作者名字（平台名_作者ID）」新建。
                     下载记录只存平台和作品 ID，保存过的作品再存时会先问你。
@@ -173,10 +181,25 @@ struct SettingsView: View {
                         }
                         .disabled(updating)
                     }
+                    if let gallery {
+                        LabeledContent("gallery-dl", value: gallery.version + (gallery.updated ? "（已更新）" : "（内置）"))
+                    } else if !galleryError.isEmpty {
+                        Text(galleryError).foregroundStyle(.red).font(.callout)
+                    }
+                    Button(updatingGallery ? "正在更新…" : "更新 gallery-dl 到最新版") {
+                        Task { await runGallery { try await YtDlp.updateGalleryToLatest() } }
+                    }
+                    .disabled(updatingGallery)
+                    if gallery?.updated == true {
+                        Button("恢复内置的 gallery-dl", role: .destructive) {
+                            Task { await runGallery { try await YtDlp.resetGalleryToBundled() } }
+                        }
+                        .disabled(updatingGallery)
+                    }
                 } header: {
                     Label("下载器", systemImage: "shippingbox")
                 } footer: {
-                    Text("其它网站用内置的 yt-dlp 下载。网站改版导致下载失败时，先点「更新」，会从 yt-dlp 官方 GitHub 下载最新版。")
+                    Text("视频用内置的 yt-dlp，图片和图文混排用内置的 gallery-dl，两个都是开源项目。网站改版导致保存失败时，先点「更新」：yt-dlp 从它的官方 GitHub 下载，gallery-dl 从 Python 官方软件源下载并校验。")
                 }
 
                 Section {
@@ -210,6 +233,7 @@ struct SettingsView: View {
                 pool = CookiePool.summaries()
                 historyCount = History.count
                 if version == nil { await run { try await YtDlp.version() } }
+                if gallery == nil { await runGallery { try await YtDlp.galleryVersion() } }
             }
         }
     }
@@ -289,6 +313,17 @@ struct SettingsView: View {
                     pool = CookiePool.summaries()
                 }
             }
+        }
+    }
+
+    private func runGallery(_ op: @escaping () async throws -> YtDlp.GalleryVersion) async {
+        updatingGallery = true
+        defer { updatingGallery = false }
+        do {
+            gallery = try await op()
+            galleryError = ""
+        } catch {
+            galleryError = "gallery-dl：" + error.localizedDescription
         }
     }
 

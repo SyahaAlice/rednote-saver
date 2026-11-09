@@ -2,7 +2,7 @@ import Foundation
 
 /// 统一的解析器结构（借鉴 cobalt / gallery-dl）：每个网站一个模块，都返回 ParsedNote，
 /// 之后的下载、去重、日期、相册归类、实况合成全部共用同一套流程。
-/// 新增网站：写一个遵守 SiteExtractor 的类型，加进 all 列表（yt-dlp 兜底，放最后）。
+/// 新增网站：写一个遵守 SiteExtractor 的类型，加进 all 列表（GenericExtractor 兜底，放最后）。
 @MainActor
 protocol SiteExtractor {
     var name: String { get }
@@ -13,10 +13,10 @@ protocol SiteExtractor {
 @MainActor
 enum Extractors {
     static let all: [SiteExtractor] = [XHSExtractor(), DouyinExtractor(), InstagramExtractor(),
-                                       XExtractor(), WeiboExtractor(), KuaishouExtractor(), YtDlpExtractor()]
+                                       XExtractor(), WeiboExtractor(), KuaishouExtractor(), GenericExtractor()]
 
     static func pick(for url: URL) -> SiteExtractor {
-        all.first { $0.canHandle(url) } ?? YtDlpExtractor()
+        all.first { $0.canHandle(url) } ?? GenericExtractor()
     }
 }
 
@@ -89,7 +89,79 @@ struct InstagramExtractor: SiteExtractor {
     }
 }
 
-// MARK: - X、微博：视频照旧用 yt-dlp；它拿不到内容（多半是图片帖子）时改用内置浏览器 + 登录账号
+// MARK: - gallery-dl：一个帖子里的图片和视频一起列出来（图文混排）
+
+/// 用 gallery-dl 列出链接里的全部内容，整理成 ParsedNote（文件由 SaveService 逐项下载）。
+/// 返回 nil 表示这条路走不通，调用方接着用原来的办法：
+/// 这个网址它不支持、它没找到内容、出错了，或者它给的全是要交给 yt-dlp 的分段视频
+@MainActor
+func galleryNote(_ url: URL, service: SaveService) async throws -> ParsedNote? {
+    let dir = try LiveTools.workDir("gallery")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let found: YtDlp.Gallery?
+    do {
+        found = try await YtDlp.gallery(url: url, into: dir, cookies: CookiePool.candidates(for: url)) { line in
+            SaveService.shared.say(line)
+        }
+    } catch {
+        if Task.isCancelled || (error as? XHSError)?.kind == .cancelled { throw error }
+        service.say("gallery-dl 没有拿到内容（\(error.localizedDescription)）")
+        return nil
+    }
+    // 这个网址 gallery-dl 不管（比如视频网站）：不出声，交给后面的 yt-dlp
+    guard let g = found else { return nil }
+    var items: [NoteMedia] = []
+    var deferred = 0
+    for i in g.items {
+        if i.needsYtDlp {
+            deferred += 1
+            continue
+        }
+        var m = NoteMedia(kind: i.kind == "video" ? .video : .image, original: [i.url], fallback: i.fallback)
+        if i.kind == "live", let clip = i.live {
+            m.kind = .live
+            m.liveVideoURLs = [clip]
+        }
+        items.append(m)
+    }
+    // 全是分段视频：整条链接交给 yt-dlp，它能下载并合并
+    if items.isEmpty { return nil }
+    if deferred > 0 {
+        // 图片和分段视频混在一起的少见情况：图片照存，视频如实记成失败，不悄悄丢掉
+        var missing = NoteMedia(kind: .video, original: [], fallback: [])
+        missing.error = "这一项是分段视频，目前没法和图片一起保存"
+        items += Array(repeating: missing, count: deferred)
+    }
+
+    let r = g.info
+    let platform = YtDlpExtractor.platformName(r.extractor, host: url.host ?? "")
+    let ids = ([r.handle] + r.uploaderIDs).filter { !$0.isEmpty }
+    let author: Author? = ids.isEmpty && r.uploader.isEmpty ? nil
+        : Author(name: r.uploader.isEmpty ? (ids.first ?? "") : r.uploader, primaryID: ids.first ?? "", ids: ids,
+                 idLabel: r.handle.isEmpty ? "用户 ID" : "用户名")
+    var note = ParsedNote(platform: platform, id: r.id, title: r.title, items: items, author: author,
+                          published: r.published, referer: g.referer)
+    let count = items.count
+    if count > YtDlpExtractor.askAbove {
+        // 单个帖子不会有这么多项：多半是主页或合集，先问一句（查重和选相册之后才问）
+        let all = items
+        let more = r.more
+        note.fetch = {
+            switch await service.ask("这个链接里有 \(count) 项\(more ? "以上（已到单次上限）" : "")",
+                                     "看起来是主页或合集。要全部保存吗？",
+                                     options: ["全部保存（\(count) 项）", "只存第 1 项"], cancel: "不存了") {
+            case 0?: return all
+            case 1?: return Array(all.prefix(1))
+            default:
+                service.cancel()
+                throw XHSError.cancelled
+            }
+        }
+    }
+    return note
+}
+
+// MARK: - X、微博：先 gallery-dl（图片和视频都拿），不行再 yt-dlp（视频），再不行用内置浏览器 + 登录账号
 
 /// 先用 yt-dlp；失败时，如果在 App 里登录过这个网站，就用内置浏览器读取帖子数据（图片、实况图、视频都能存）。
 /// 没登录过就报「需要登录」，SaveService 会提示「登录后重试」。
@@ -118,7 +190,8 @@ struct XExtractor: SiteExtractor {
     func canHandle(_ url: URL) -> Bool { XPost.isPost(url) }
 
     func extract(_ url: URL, service: SaveService) async throws -> ParsedNote {
-        try await ytDlpThenWeb(url, service: service, site: "x.com", siteName: "X",
+        if let note = try await galleryNote(url, service: service) { return note }
+        return try await ytDlpThenWeb(url, service: service, site: "x.com", siteName: "X",
                                capture: { XPost.capture(account: $0, start: url) },
                                parse: { try XPost.parse(tweet: $0) })
     }
@@ -129,7 +202,8 @@ struct WeiboExtractor: SiteExtractor {
     func canHandle(_ url: URL) -> Bool { Weibo.isPost(url) }
 
     func extract(_ url: URL, service: SaveService) async throws -> ParsedNote {
-        try await ytDlpThenWeb(url, service: service, site: "weibo.com", siteName: "微博",
+        if let note = try await galleryNote(url, service: service) { return note }
+        return try await ytDlpThenWeb(url, service: service, site: "weibo.com", siteName: "微博",
                                capture: { Weibo.capture(account: $0, start: url) },
                                parse: { try Weibo.parse(status: $0) })
     }
@@ -179,7 +253,25 @@ struct KuaishouExtractor: SiteExtractor {
     }
 }
 
-// MARK: - 其它网站：内嵌的 yt-dlp
+// MARK: - 其它网站：先问 gallery-dl（图片、图文混排），它不管的再交给 yt-dlp（视频）
+
+struct GenericExtractor: SiteExtractor {
+    let name = "其它网站"
+    func canHandle(_ url: URL) -> Bool { true }
+
+    /// 这些网站不走 gallery-dl：Instagram 用它容易触发验证，这里到的是帖子以外的链接（主页、快拍），交给 yt-dlp
+    static let skipGallery: Set<String> = ["instagram.com"]
+
+    func extract(_ url: URL, service: SaveService) async throws -> ParsedNote {
+        if !Self.skipGallery.contains(CookiePool.site(of: url.host ?? "")),
+           let note = try await galleryNote(url, service: service) {
+            return note
+        }
+        return try await YtDlpExtractor().extract(url, service: service)
+    }
+}
+
+// MARK: - yt-dlp：视频
 
 struct YtDlpExtractor: SiteExtractor {
     let name = "yt-dlp"

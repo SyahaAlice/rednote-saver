@@ -6,6 +6,7 @@
 #
 # 下载分两步：probe 只解析（拿到标题、作者、作品 ID），fetch 才真正下载。
 # 这样 App 可以在下载之前先查重、选相册。两步之间的解析结果存在 _PENDING 里。
+# 文件最后一部分是 gallery-dl：列出帖子里的全部图片和视频（图文混排），不下载。
 # 多图 / 多视频帖子、合集里的每一项都会下载（最多 MAX_ENTRIES 项）。
 
 import copy
@@ -120,9 +121,18 @@ def reload(args_json):
     return version()
 
 
-# 一个链接最多保存多少项。多图 / 多视频帖子远小于这个数（Instagram 最多 20、微博 18）；
-# 只是防止贴了一个几百集的合集链接时一口气全下
+# 一个链接最多保存多少项的默认值。多图 / 多视频帖子远小于这个数（Instagram 最多 20、微博 18）；
+# 只是防止贴了一个几百集的合集链接时一口气全下。用户可以在设置里改，也可以设成不限
 MAX_ENTRIES = 100
+
+
+def _limit(a):
+    """这一次的上限：参数 max_entries，0 = 不限（返回 None），没传就用默认值"""
+    v = a.get("max_entries")
+    if v is None:
+        return MAX_ENTRIES
+    v = int(v)
+    return v if v > 0 else None
 
 # probe 解析好、等 fetch 来下载的内容（同一个解释器里，两次调用之间一直在）
 _PENDING = None
@@ -142,7 +152,7 @@ def _opts(a, log, cancel, ck, out_dir=None):
         "format": a.get("format") or _format(a.get("max_height")),
         "format_sort": FORMAT_SORT,
         "noplaylist": True,  # 链接同时指向一个视频和它所在的合集时，只要这个视频
-        "playlistend": MAX_ENTRIES,
+        "playlistend": _limit(a),
         "restrictfilenames": True,
         "overwrites": True,
         "logger": log,
@@ -235,7 +245,8 @@ def _meta(items, top):
 def probe(args_json):
     """第一步：只解析。
     参数：url, out_dir, cookies（按顺序尝试的 cookies 文件列表，null 表示游客）, log, cache_dir, cancel,
-          max_height（清晰度上限，0 = 不限）, format（直接指定 yt-dlp 的格式串，一般不用）
+          max_height（清晰度上限，0 = 不限）, max_entries（一个链接最多几项，0 = 不限）,
+          format（直接指定 yt-dlp 的格式串，一般不用）
     返回：{"ok": true, "id", "title", "extractor", "uploader", ...,
            "entries": 链接里的项数, "more": 是否可能还有超出 MAX_ENTRIES 的没算进来}"""
     global _PENDING
@@ -257,8 +268,9 @@ def probe(args_json):
                 log.write(f"失败：{e}")
                 continue
             _PENDING = {"args": a, "cookies": cookies, "index": i, "items": items}
+            limit = _limit(a)
             return json.dumps(dict(_meta(items, top), ok=True, entries=len(items),
-                                   more=len(items) >= MAX_ENTRIES), ensure_ascii=False)
+                                   more=bool(limit) and len(items) >= limit), ensure_ascii=False)
         return _fail(str(last_err))
     except Exception as e:
         log.write(traceback.format_exc())
@@ -317,6 +329,198 @@ def fetch(args_json):
             if any("streams" in o for o in out):
                 return json.dumps({"ok": True, "items": out}, ensure_ascii=False)
         return _fail(str(last_err))
+    except Exception as e:
+        log.write(traceback.format_exc())
+        return _fail(f"{type(e).__name__}: {e}")
+    finally:
+        log.close()
+
+
+# ---------------------------------------------------------------- gallery-dl：图片和图文混排
+#
+# yt-dlp 只管视频。gallery-dl（开源，GPL-2.0）会把一个帖子里的图片和视频一起列出来，
+# 支持 X、微博、Pixiv、Bluesky、Reddit、Tumblr 等几百个网站。这里只用它「列出内容」：
+# 拿到每一项的地址后交回 Swift，由 App 自己下载、合成实况、存进相册。
+#
+# 不做任何内容过滤：不按敏感标记、年龄分级、转发 / 引用等跳过内容，
+# gallery-dl 里默认会跳过内容的开关都在 _gdl_setup 里关掉了。
+
+_IMAGE_EXT = {"jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "avif", "bmp", "tif", "tiff"}
+_VIDEO_EXT = {"mp4", "mov", "m4v", "webm", "mkv", "ts", "flv", "m3u8"}
+
+
+def _gdl_path(zip_path):
+    """App 里更新下来的 gallery-dl（PyPI 上的 wheel，本身就是 zip）存在时优先用它"""
+    sys.path[:] = [p for p in sys.path if not p.endswith("gallery-dl.zip")]
+    if zip_path and os.path.exists(zip_path):
+        sys.path.insert(0, zip_path)
+
+
+def gdl_version(args_json=None):
+    a = json.loads(args_json or "{}")
+    _gdl_path(a.get("gdl_zip"))
+    import gallery_dl
+    from gallery_dl import version
+    return json.dumps({
+        "gallery_dl": version.__version__,
+        "source": os.path.dirname(os.path.dirname(gallery_dl.__file__)),
+    }, ensure_ascii=False)
+
+
+def gdl_reload(args_json):
+    """更新 gallery-dl 之后重新加载：清掉已导入的模块，按新的 sys.path 重新导入"""
+    for name in list(sys.modules):
+        if name == "gallery_dl" or name.startswith("gallery_dl."):
+            del sys.modules[name]
+    return gdl_version(args_json)
+
+
+def _gdl_setup(a, ck):
+    from gallery_dl import config
+    config.clear()
+    config.set(("output",), "private", True)  # 保留 _fallback（备用地址）等内部字段
+    cache_dir = a.get("cache_dir")
+    config.set(("cache",), "file", os.path.join(cache_dir, "gallery-dl.sqlite3") if cache_dir else None)
+    # 单次上限和 yt-dlp 一样；多取一项用来判断「后面还有没有」。不限时不设范围
+    limit = _limit(a)
+    if limit:
+        config.set(("extractor",), "image-range", f"1-{limit + 1}")
+    config.set(("extractor",), "cookies", ck or None)
+    config.set(("extractor",), "cookies-update", False)  # 不往号池的 cookies 文件里回写
+    # 默认会跳过内容的开关全部打开：被标成不可用的媒体、转发、微博的「电影」类视频
+    config.set(("extractor", "twitter"), "unavailable", True)
+    config.set(("extractor", "twitter"), "retweets", True)
+    config.set(("extractor", "weibo"), "retweets", "original")
+    config.set(("extractor", "weibo"), "movies", True)
+
+
+def _dig(d, path):
+    for key in path.split("."):
+        if not isinstance(d, dict):
+            return None
+        d = d.get(key)
+    return d
+
+
+def _gdl_first(sources, *paths):
+    for src in sources:
+        for path in paths:
+            v = _dig(src, path)
+            if v not in (None, "", [], {}):
+                return v
+    return None
+
+
+def _gdl_meta(job):
+    """把各个网站叫法不同的字段整理成和 probe 一样的作品信息"""
+    import calendar
+    import datetime
+    sources = [d for d in (job.data_meta[:1] + job.data_post[:1]) if isinstance(d, dict)]
+    category = getattr(job.extractor, "category", "") or ""
+
+    def first(*paths):
+        return _gdl_first(sources, *paths)
+
+    ident = first("tweet_id", "status.mblogid", "status.id", "post_id", "shortcode", "id", "gallery_id")
+    # 作者：显示用的昵称，和用来认人的 ID（X 是 @ 后面的用户名）
+    name = first("author.nick", "status.user.screen_name", "user.screen_name", "user.nick", "author.name",
+                 "user.name", "uploader", "username", "artist", "owner.name")
+    handle = first("author.name") if category == "twitter" else None
+    ids = [first(p) for p in ("status.user.idstr", "status.user.id", "author.id", "user.idstr", "user.id",
+                              "user_id", "uploader_id")]
+    date = first("date", "status.date")
+    timestamp = first("timestamp")
+    if isinstance(date, datetime.datetime):
+        timestamp = calendar.timegm(date.utctimetuple())
+    seen = []
+    for i in ids:
+        i = str(i) if i not in (None, "") else ""
+        if i and i not in seen:
+            seen.append(i)
+    return {
+        "id": str(ident) if ident is not None else None,
+        "title": first("content", "status.text_raw", "title", "description", "caption"),
+        "extractor": category,
+        "uploader": name,
+        "uploader_ids": seen,
+        "handle": handle,
+        "timestamp": timestamp if isinstance(timestamp, (int, float)) else None,
+        "upload_date": None,
+        "thumbnail": None,
+    }
+
+
+def _gdl_items(job):
+    import itertools
+    out = []
+    for url, kw in zip(job.data_urls, job.data_meta):
+        ytdl = url.startswith("ytdl:")
+        if ytdl:
+            url = url[5:]
+        ext = str(kw.get("extension") or "").lower()
+        kind = "video" if (ytdl or ext in _VIDEO_EXT) else "image"
+        fallback = []
+        try:
+            fb = kw.get("_fallback")
+            if fb:
+                fallback = [u for u in itertools.islice(fb, 3) if isinstance(u, str) and u.startswith("http")]
+        except Exception:
+            fallback = []
+        kind_tag = kw.get("type")
+        # 微博实况图：先给图片，紧跟着给它的动态视频，两项合成一项「实况」
+        if (out and kind_tag == "livephoto" and kind == "video" and not ytdl
+                and out[-1].get("type") == "livephoto" and out[-1]["kind"] == "image"):
+            out[-1]["kind"] = "live"
+            out[-1]["live"] = url
+            continue
+        out.append({"url": url, "ext": ext, "kind": kind, "ytdl": ytdl, "fallback": fallback, "type": kind_tag})
+    return out
+
+
+def gallery(args_json):
+    """用 gallery-dl 列出一个链接里的全部图片和视频（不下载）。
+    参数：url, cookies（按顺序尝试，null 表示游客）, log, cache_dir, cancel, gdl_zip, max_entries（0 = 不限）
+    返回：{"ok": true, 作品信息（同 probe）, "referer", "more",
+           "items": [{"url", "kind": image / video / live, "live"（实况的视频地址）, "fallback": [...], "ytdl": 需要交给 yt-dlp}]}
+    这个网址 gallery-dl 不支持时返回 {"ok": false, "unsupported": true}"""
+    a = json.loads(args_json)
+    log = _Log(a.get("log"))
+    cancel = _Cancel(a.get("cancel"))
+    try:
+        _gdl_path(a.get("gdl_zip"))
+        from gallery_dl import extractor, job
+        url = a["url"]
+        if extractor.find(url) is None:
+            return json.dumps({"ok": False, "unsupported": True, "error": "gallery-dl 不支持这个网址"}, ensure_ascii=False)
+        last_err = None
+        for ck in a.get("cookies") or [None]:
+            if cancel.hit():
+                return _cancelled()
+            log.write(_account(ck))
+            try:
+                _gdl_setup(a, ck)
+                # resolve=1：链接只是跳转（比如 t.co 短链）时，跟过去一层
+                j = job.DataJob(url, file=None, resolve=1)
+                j.run()
+                if not j.data_urls:
+                    raise j.exception or Exception("没有找到可保存的内容")
+                items = _gdl_items(j)
+                limit = _limit(a)
+                more = bool(limit) and len(items) > limit
+                if limit:
+                    items = items[:limit]
+                root = getattr(j.extractor, "root", None)
+                log.write(f"gallery-dl 找到 {len(items)} 项")
+                meta = _gdl_meta(j)
+                if not meta["id"]:
+                    meta["id"] = url  # 没有作品 ID 的（比如直接指向图片的链接）用网址本身查重
+                return json.dumps(dict(meta, ok=True, entries=len(items), more=more,
+                                       items=items, referer=(root + "/") if root else None),
+                                  ensure_ascii=False, default=str)
+            except Exception as e:  # 这个账号不行就换下一个，全部失败再报错
+                last_err = e
+                log.write(f"失败：{type(e).__name__}: {e}")
+        return _fail(f"{type(last_err).__name__}: {last_err}")
     except Exception as e:
         log.write(traceback.format_exc())
         return _fail(f"{type(e).__name__}: {e}")
