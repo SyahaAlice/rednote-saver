@@ -97,7 +97,7 @@ final class SaveService: ObservableObject {
     /// 失败信息看起来像是需要登录 / cookie 失效
     private func looksLikeAuth(_ error: Error) -> Bool {
         let s = error.localizedDescription.lowercased()
-        return ["login", "log in", "sign in", "cookie", "403", "401", "登录", "验证", "private", "需要登录"]
+        return ["login", "log in", "sign in", "cookie", "403", "401", "登录", "验证", "需要登录", "logged in"]
             .contains { s.contains($0) }
     }
 
@@ -128,8 +128,13 @@ final class SaveService: ObservableObject {
                 // 失败时可以直接在内置浏览器里补登这个网站，登录后自动重试一次
                 let site = CookiePool.site(of: url.host ?? "")
                 say("失败：" + error.localizedDescription)
-                let reason = looksLikeAuth(error) ? "看起来需要登录，或者号池里的 cookie 已失效。" : "下载失败了。"
-                guard await ask("\(site) 没有保存成功", reason + "要用内置浏览器登录（补登）\(site)后重试吗？",
+                // 只有「看起来是登录问题」或「这个网站的号池账号已失效 / 未激活」时才提示补登；
+                // 地区限制、作品被删之类的失败直接报错
+                let auth = looksLikeAuth(error)
+                let badPool = CookiePool.hasProblem(for: url)
+                guard auth || badPool else { throw error }
+                let reason = badPool ? "号池里\(site)的 cookie 已失效或未激活。" : "看起来需要登录。"
+                guard await ask("\(site) 没有保存成功", reason + "要用内置浏览器登录（补登）后重试吗？",
                                 options: ["登录后重试"], cancel: "不用了") != nil else { throw error }
                 let account = WebAccounts.shared.accountForLogin(url: url)
                 await runLogin(account)

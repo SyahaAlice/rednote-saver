@@ -87,14 +87,14 @@ enum CookiePool {
 
     /// 按网站挑出能用的 cookies 文件，从上次轮到的那个开始排；nil 表示游客。
     /// 小红书游客在前，其它网站账号在前、游客垫底（与 dl.py 的 cookie_candidates 相同）
-    static func candidates(for url: URL) -> [URL?] {
+    static func candidates(for url: URL, rotate: Bool = true) -> [URL?] {
         let site = site(of: url.host ?? "")
         func sameSite(_ d: String) -> Bool {
             let sd = self.site(of: d)
             return sd == site || sd.hasSuffix("." + site) || site.hasSuffix("." + sd)
         }
         var files = allFiles().filter { domains(in: $0).contains(where: sameSite) }
-        if !files.isEmpty {
+        if rotate, !files.isEmpty {
             let saved = (try? String(contentsOf: stateFile, encoding: .utf8))
                 .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
             let start = ((saved % files.count) + files.count) % files.count
@@ -120,24 +120,80 @@ enum CookiePool {
         }
     }
 
-    /// 设置页显示用：每个账号文件有哪些网站、是否包含登录凭证（只看名字，不显示值）
+    /// 各网站表示「已登录」的 cookie 名（只看名字，不读值）
+    static let loginCookieNames: Set<String> = [
+        "web_session",                     // 小红书 / rednote
+        "sessionid", "sessionid_ss", "sid_tt",  // 抖音
+        "SESSDATA",                        // B 站
+        "SUB",                             // 微博
+        "auth_token",                      // X
+    ]
+
+    /// 账号状态：正常 / 已过期 / 未登录（未激活）
+    enum Health: Equatable {
+        case ok(expires: Date?)
+        case expired
+        case notLoggedIn
+
+        var needsLogin: Bool { if case .ok = self { return false } else { return true } }
+        var text: String {
+            switch self {
+            case .ok(let d): return d.map { "正常（登录有效期到 " + $0.formatted(date: .abbreviated, time: .omitted) + "）" } ?? "正常"
+            case .expired: return "已过期，需要补登"
+            case .notLoggedIn: return "未登录（未激活），需要补登"
+            }
+        }
+    }
+
+    static func health(of file: URL) -> Health {
+        let login = entries(in: file).filter { loginCookieNames.contains($0.name) }
+        guard !login.isEmpty else { return .notLoggedIn }
+        let alive = login.filter { ($0.expires ?? .distantFuture) > Date() }
+        guard !alive.isEmpty else { return .expired }
+        return .ok(expires: alive.compactMap(\.expires).min())
+    }
+
+    /// 这个网站的号池账号里有没有失效 / 未激活的
+    static func hasProblem(for url: URL) -> Bool {
+        candidates(for: url, rotate: false).compactMap { $0 }.contains { health(of: $0).needsLogin }
+    }
+
+    /// 小红书：带这个账号的 cookie 打开小红书，看网页认不认为已登录（nil = 没法判断）
+    static func verifyOnline(_ file: URL) async -> Bool? {
+        let config = URLSessionConfiguration.ephemeral
+        if let jar = config.httpCookieStorage {
+            for c in httpCookies(from: file) { jar.setCookie(c) }
+        }
+        let session = URLSession(configuration: config)
+        defer { session.finishTasksAndInvalidate() }
+        var req = URLRequest(url: URL(string: "https://www.xiaohongshu.com/explore")!, timeoutInterval: 20)
+        for (k, v) in NoteParser.pageHeaders { req.setValue(v, forHTTPHeaderField: k) }
+        guard let result = try? await session.data(for: req),
+              let state = try? NoteParser.initialState(String(decoding: result.0, as: UTF8.self)),
+              let user = state["user"] as? [String: Any] else { return nil }
+        // 小红书网页的状态里，loggedIn 可能直接是布尔值，也可能包在 { _value / value } 里
+        func bool(_ v: Any?) -> Bool? {
+            if let b = v as? Bool { return b }
+            if let d = v as? [String: Any] { return bool(d["_rawValue"] ?? d["_value"] ?? d["value"]) }
+            return nil
+        }
+        return bool(user["loggedIn"])
+    }
+
+    /// 设置页显示用：每个账号文件有哪些网站、状态（只看名字，不显示值）
     struct Summary: Identifiable {
         var id: String { name }
         var name: String
+        var file: URL
         var sites: [String]
-        var loggedIn: Bool
-        var expired: Int
+        var health: Health
     }
 
     static func summaries() -> [Summary] {
         allFiles().map { file in
             let es = entries(in: file)
             let sites = Set(es.map { site(of: $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))) })
-            let names = Set(es.map(\.name))
-            let loginNames: Set<String> = ["web_session", "SESSDATA", "sessionid", "auth_token", "SUB", "sessionid_ss"]
-            return Summary(name: file.lastPathComponent, sites: sites.sorted(),
-                           loggedIn: !names.isDisjoint(with: loginNames),
-                           expired: es.filter { ($0.expires ?? .distantFuture) < Date() }.count)
+            return Summary(name: file.lastPathComponent, file: file, sites: sites.sorted(), health: health(of: file))
         }
     }
 }

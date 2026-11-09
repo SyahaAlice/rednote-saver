@@ -11,6 +11,8 @@ struct SettingsView: View {
     @State private var historyCount = History.count
     @State private var prefixes = Prefs.albumPrefixes
     @State private var newPlatform = ""
+    @State private var onlineResults: [String: Bool] = [:]
+    @State private var checking = false
     @State private var version: YtDlp.Version?
     @State private var versionError = ""
     @State private var updating = false
@@ -139,28 +141,65 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(accounts) { a in
-                        VStack(alignment: .leading, spacing: 2) {
+                        let online = onlineResults[a.name]
+                        let bad = a.health.needsLogin || online == false
+                        VStack(alignment: .leading, spacing: 4) {
                             HStack {
+                                Image(systemName: bad ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
+                                    .foregroundStyle(bad ? .orange : .green)
                                 Text(a.name)
                                 Spacer()
-                                Text(a.loggedIn ? "含登录凭证" : "未登录")
-                                    .foregroundStyle(a.loggedIn ? .green : .orange)
+                                Text(a.sites.joined(separator: "、"))
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
-                            Text(a.sites.joined(separator: "、"))
-                                .font(.caption).foregroundStyle(.secondary)
-                            if a.expired > 0 {
-                                Text("有 \(a.expired) 条 cookie 已过期").font(.caption).foregroundStyle(.orange)
+                            Text(online == false ? "在线验证：已失效，需要补登" : a.health.text)
+                                .font(.caption)
+                                .foregroundStyle(bad ? .orange : .secondary)
+                            if online == true {
+                                Text("在线验证：小红书确认已登录").font(.caption).foregroundStyle(.green)
+                            }
+                            if bad, let site = a.sites.first {
+                                Button("用内置浏览器补登") {
+                                    let url = URL(string: "https://www.\(site)/")!
+                                    loginAccount = WebAccounts.shared.accountForLogin(url: url)
+                                }
+                                .buttonStyle(.borderless)
+                                .font(.callout)
+                            }
+                        }
+                        .swipeActions {
+                            Button("删除", role: .destructive) {
+                                try? FileManager.default.removeItem(at: a.file)
+                                accounts = CookiePool.summaries()
                             }
                         }
                     }
-                    Button("重新读取") { accounts = CookiePool.summaries() }
+                    HStack {
+                        Button("重新读取") {
+                            accounts = CookiePool.summaries()
+                            onlineResults = [:]
+                        }
+                        Spacer()
+                        Button(checking ? "正在验证…" : "在线验证小红书账号") {
+                            Task {
+                                checking = true
+                                for a in accounts where a.sites.contains("xiaohongshu.com") {
+                                    if let r = await CookiePool.verifyOnline(a.file) { onlineResults[a.name] = r }
+                                }
+                                checking = false
+                            }
+                        }
+                        .disabled(checking || !accounts.contains { $0.sites.contains("xiaohongshu.com") })
+                    }
+                    .buttonStyle(.borderless)
                 } header: {
                     Label("号池（cookies 文件夹，含电脑导入的文件）", systemImage: "tray.full")
                 } footer: {
                     Text("""
                     在电脑上用 merge_cookies.py 整理好 Netscape 格式的 .txt，推到 App 的 cookies 文件夹：
-                    opendevice afc push --app \(bundleID) --documents 本地文件 /cookies/
-                    也可以在「文件 → 我的 iPhone → 多功能媒体下载器 → cookies」里直接放进去。只显示文件名和网站，不显示 cookie 内容。
+                    opendevice afc push --app \(bundleID) 本地文件 /Documents/cookies/
+                    也可以在「文件 → 我的 iPhone → 多功能媒体下载器 → cookies」里直接放进去。
+                    只有失效或未激活的账号会显示「补登」。左滑可从号池删除。只显示文件名和网站，不显示 cookie 内容。
                     """)
                     .textSelection(.enabled)
                 }
