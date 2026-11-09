@@ -92,48 +92,53 @@ struct DownloadView: View {
     }
 }
 
-/// 解析完后选相册：
-/// - 按作者 ID（小红书号 / 抖音号等）找已有相册，找到了确认后放入；也可以另建新相册
-/// - 拿不到 ID 时手动填写，再重新查找
-/// - 新相册默认按「作者名字（平台名_作者ID）」命名
+/// 解析完后选相册。用户名、用户 ID 是两个可改的变量，按命名格式生成相册名：
+/// - 常规：用户A（xhs_idA）    多平台 / 多账号：用户E1（平台1_idE1）/用户E2（平台2_idE2）
+/// - 已注销 / 常删作品：用户F【平台_idF】
+/// 先按 ID（再按用户名）找已有相册，找到了确认后放入；也可以另建新相册
 struct AlbumChoiceView: View {
     let request: AlbumRequest
     @ObservedObject private var service = SaveService.shared
-    @State private var authorID = ""
+
+    @State private var name = ""
+    @State private var userID = ""
+    @State private var prefix = ""
+    @State private var style = Albums.Style.normal
+    @State private var name2 = ""
+    @State private var prefix2 = ""
+    @State private var userID2 = ""
+    @State private var albumName = ""
     @State private var matches: [Albums.Match] = []
-    @State private var newName = ""
     @State private var confirming: Albums.Match?
 
-    private var author: Author {
-        var a = request.author
-        let id = authorID.trimmingCharacters(in: .whitespaces)
-        a.primaryID = id
-        if !id.isEmpty, !a.ids.contains(id) { a.ids.insert(id, at: 0) }
-        return a
+    private func trimmed(_ s: String) -> String { s.trimmingCharacters(in: .whitespaces) }
+
+    private var generated: String {
+        Albums.compose(style,
+                       Albums.Entry(name: trimmed(name), prefix: prefix, id: trimmed(userID)),
+                       style == .multi ? Albums.Entry(name: trimmed(name2), prefix: prefix2, id: trimmed(userID2)) : nil)
     }
 
-    private func refresh() {
-        matches = Albums.matches(for: author)
-        let id = authorID.trimmingCharacters(in: .whitespaces)
-        newName = id.isEmpty ? "" : Albums.ruleName(platform: request.platform, author: author)
+    private func search() {
+        var ids = request.author.ids
+        for i in [trimmed(userID), trimmed(userID2)] where !i.isEmpty && !ids.contains(i) { ids.insert(i, at: 0) }
+        matches = Albums.matches(for: Author(name: trimmed(name), primaryID: trimmed(userID), ids: ids))
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    LabeledContent("作者", value: request.author.name)
-                    TextField(request.author.idLabel, text: $authorID)
+                    TextField("用户名", text: $name)
+                    TextField(request.author.idLabel, text: $userID)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .onSubmit(refresh)
-                    Button("按这个\(request.author.idLabel)重新查找") { refresh() }
-                        .disabled(authorID.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button("按用户名和 ID 重新查找已有相册") { search() }
                 } header: {
-                    Text("作者")
+                    Text("\(request.platform) 作者")
                 } footer: {
                     if request.author.primaryID.isEmpty {
-                        Text("没拿到\(request.author.idLabel)，请手动填写（在作者主页能看到），填好后点「重新查找」。")
+                        Text("没拿到\(request.author.idLabel)，请手动填写（作者主页能看到），再点「重新查找」。")
                             .foregroundStyle(.orange)
                     }
                 }
@@ -147,7 +152,7 @@ struct AlbumChoiceView: View {
                                 HStack {
                                     Text(m.title)
                                     Spacer()
-                                    Text(m.byID ? "ID 匹配" : "仅昵称匹配")
+                                    Text(m.byID ? "ID 匹配" : "仅用户名匹配")
                                         .font(.caption)
                                         .foregroundStyle(m.byID ? .green : .orange)
                                 }
@@ -156,20 +161,35 @@ struct AlbumChoiceView: View {
                     } header: {
                         Text("已有相册")
                     } footer: {
-                        Text("点一下确认后放入。「仅昵称匹配」可能是同名的其他作者。")
+                        Text("点一下确认后放入。「仅用户名匹配」可能是同名的其他作者。")
                     }
                 }
 
                 Section {
-                    TextField("相册名", text: $newName)
-                    Button(matches.isEmpty ? "新建并放入" : "另建新相册并放入") {
-                        service.decideAlbum(.create(newName.trimmingCharacters(in: .whitespaces)))
+                    Picker("命名格式", selection: $style) {
+                        ForEach(Albums.Style.allCases) { Text($0.title).tag($0) }
                     }
-                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    TextField("ID 前缀（如 xhs_、x_@、ins_@、UID:）", text: $prefix)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if style == .multi {
+                        TextField("第二个账号的用户名", text: $name2)
+                        TextField("第二个账号的 ID 前缀", text: $prefix2)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("第二个账号的 ID", text: $userID2)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    TextField("相册名", text: $albumName)
+                    Button(matches.isEmpty ? "新建相册并放入" : "另建新相册并放入") {
+                        service.decideAlbum(.create(trimmed(albumName)))
+                    }
+                    .disabled(trimmed(albumName).isEmpty)
                 } header: {
                     Text(matches.isEmpty ? "没有找到这个作者的相册，新建一个" : "或者另建新相册")
                 } footer: {
-                    Text("默认按「作者名字（\(request.platform)_\(request.author.idLabel)）」命名，可以修改。")
+                    Text("相册名会随上面的内容自动生成，最后也可以直接改。ID 前缀的默认值在「设置 → 相册命名」里改。")
                 }
 
                 Section {
@@ -179,10 +199,14 @@ struct AlbumChoiceView: View {
             .navigationTitle("放进哪个相册")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                authorID = request.author.primaryID
-                refresh()
-                if newName.isEmpty { newName = request.author.name }
+                name = request.author.name
+                userID = request.author.primaryID
+                prefix = Prefs.idPrefix(for: request.platform)
+                prefix2 = prefix
+                albumName = generated
+                matches = request.matches
             }
+            .onChange(of: generated) { albumName = $0 }
             .alert("放入这个相册？", isPresented: Binding(get: { confirming != nil },
                                                     set: { if !$0 { confirming = nil } }),
                    presenting: confirming) { m in

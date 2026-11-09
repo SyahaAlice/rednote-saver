@@ -160,6 +160,8 @@ def download(args_json):
                     # 作者：昵称可能重复，ID 通常唯一（相册归类用）
                     "uploader": chosen.get("uploader") or chosen.get("channel") or chosen.get("creator"),
                     "uploader_ids": [str(x) for x in (chosen.get("uploader_id"), chosen.get("channel_id")) if x],
+                    # Instagram 的 uploader_id 是数字，用户名（@ 后面那个）在 channel 里
+                    "handle": chosen.get("channel") if chosen.get("extractor_key", "").startswith("Instagram") else None,
                     "timestamp": chosen.get("timestamp") or chosen.get("release_timestamp"),
                     "upload_date": chosen.get("upload_date"),
                     "streams": streams,

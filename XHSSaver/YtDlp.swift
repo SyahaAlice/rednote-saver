@@ -78,6 +78,7 @@ enum YtDlp {
         var extractor: String
         var uploader: String
         var uploaderIDs: [String]
+        var handle: String
         var published: Date?
         var streams: [Stream]
     }
@@ -132,6 +133,7 @@ enum YtDlp {
         }
         return Result(id: o["id"] as? String ?? UUID().uuidString, title: o["title"] as? String ?? "",
                       extractor: o["extractor"] as? String ?? "", uploader: o["uploader"] as? String ?? "",
-                      uploaderIDs: o["uploader_ids"] as? [String] ?? [], published: published, streams: streams)
+                      uploaderIDs: o["uploader_ids"] as? [String] ?? [], handle: o["handle"] as? String ?? "",
+                      published: published, streams: streams)
     }
 }

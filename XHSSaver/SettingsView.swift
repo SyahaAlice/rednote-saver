@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage(Prefs.usePublishDateKey) private var usePublishDate = false
     @AppStorage(Prefs.askAlbumKey) private var askAlbum = true
     @State private var historyCount = History.count
+    @State private var prefixes = Prefs.albumPrefixes
     @State private var version: YtDlp.Version?
     @State private var versionError = ""
     @State private var updating = false
@@ -41,6 +42,26 @@ struct SettingsView: View {
                     选择相册需要「完整照片访问」权限（要读取已有相册名）：会按作者 ID 找已有相册，找不到就按「作者名字（平台名_作者ID）」新建。
                     下载记录只存平台和作品 ID，保存过的作品再存时会先问你。
                     """)
+                }
+
+                Section {
+                    ForEach(Prefs.prefixPlatforms, id: \.self) { platform in
+                        HStack {
+                            Text(platform)
+                            Spacer()
+                            TextField("前缀", text: Binding(
+                                get: { prefixes[platform] ?? Prefs.idPrefix(for: platform) },
+                                set: { prefixes[platform] = $0; Prefs.albumPrefixes = prefixes }))
+                                .multilineTextAlignment(.trailing)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .frame(maxWidth: 140)
+                        }
+                    }
+                } header: {
+                    Text("相册命名：ID 前缀")
+                } footer: {
+                    Text("常规格式：用户名（前缀ID），例如 用户A（xhs_idA）、用户B（x_@idB）、用户D（UID:idD）。没列出来的平台用「平台名_」。")
                 }
 
                 Section {

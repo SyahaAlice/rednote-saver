@@ -99,9 +99,12 @@ struct YtDlpExtractor: SiteExtractor {
             let isImage = ["jpg", "jpeg", "png", "heic", "webp", "gif"].contains(file.pathExtension.lowercased())
             let item = NoteMedia(kind: isImage ? .image : .video, original: [], fallback: [], localFile: file)
             let platform = Self.platformName(r.extractor, host: url.host ?? "")
-            let author: Author? = r.uploaderIDs.isEmpty && r.uploader.isEmpty ? nil
-                : Author(name: r.uploader.isEmpty ? (r.uploaderIDs.first ?? "") : r.uploader,
-                         primaryID: r.uploaderIDs.first ?? r.uploader, ids: r.uploaderIDs)
+            // 相册名里的 ID：Instagram 用 @ 后面的用户名，其它用 yt-dlp 的 uploader_id（X 是 @ 后面的那个，B 站是 UID）
+            let ids = ([r.handle] + r.uploaderIDs).filter { !$0.isEmpty }
+            let author: Author? = ids.isEmpty && r.uploader.isEmpty ? nil
+                : Author(name: r.uploader.isEmpty ? (ids.first ?? "") : r.uploader,
+                         primaryID: ids.first ?? "", ids: ids,
+                         idLabel: platform == "哔哩哔哩" ? "UID" : "用户 ID")
             return ParsedNote(platform: platform, id: r.id, title: r.title, items: [item],
                               author: author, published: r.published, referer: "", workDir: dir)
         } catch {

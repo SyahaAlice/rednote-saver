@@ -75,8 +75,49 @@ enum PhotoSaver {
 
 /// 相册：按作者匹配已有相册，或按规则新建「作者名字（平台名_作者ID）」
 enum Albums {
+    /// 相册命名格式
+    enum Style: String, CaseIterable, Identifiable {
+        case normal, multi, deleted
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .normal: return "常规"
+            case .multi: return "多平台 / 多账号"
+            case .deleted: return "已注销 / 常删作品"
+            }
+        }
+    }
+
+    /// 一个账号在相册名里的样子：用户名 + 前缀 + ID
+    struct Entry {
+        var name: String
+        var prefix: String
+        var id: String
+
+        /// 「x_@」这类前缀自带 @，ID 里再有 @ 就去掉一个
+        var tag: String {
+            var i = id.trimmingCharacters(in: .whitespaces)
+            if prefix.hasSuffix("@"), i.hasPrefix("@") { i.removeFirst() }
+            return prefix + i
+        }
+    }
+
+    /// 常规：用户A（xhs_idA）；多平台：用户E1（平台1_idE1）/用户E2（平台2_idE2）；已注销：用户F【平台_idF】
+    static func compose(_ style: Style, _ first: Entry, _ second: Entry?) -> String {
+        switch style {
+        case .normal:
+            return "\(first.name)（\(first.tag)）"
+        case .deleted:
+            return "\(first.name)【\(first.tag)】"
+        case .multi:
+            let a = "\(first.name)（\(first.tag)）"
+            guard let second, !(second.name.isEmpty && second.id.isEmpty) else { return a }
+            return a + "/\(second.name)（\(second.tag)）"
+        }
+    }
+
     static func ruleName(platform: String, author: Author) -> String {
-        "\(author.name)（\(platform)_\(author.primaryID)）"
+        compose(.normal, Entry(name: author.name, prefix: Prefs.idPrefix(for: platform), id: author.primaryID), nil)
     }
 
     struct Match {
@@ -89,7 +130,8 @@ enum Albums {
     /// 在用户自己建的相册里找名字包含作者 ID（优先）或昵称的
     static func matches(for author: Author) -> [Match] {
         let all = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil)
-        let ids = author.ids.filter { $0.count >= 4 }  // 太短的 ID 容易误匹配
+        // 太短的 ID 容易误匹配；@ 开头的去掉 @ 再找（相册里可能写成 x_@id）
+        let ids = author.ids.map { $0.hasPrefix("@") ? String($0.dropFirst()) : $0 }.filter { $0.count >= 4 }
         let name = author.name.trimmingCharacters(in: .whitespaces)
         var byID: [Match] = [], byName: [Match] = []
         all.enumerateObjects { c, _, _ in

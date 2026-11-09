@@ -65,6 +65,24 @@ enum Prefs {
     static let imageFormatKey = "imageFormat"
     static let usePublishDateKey = "usePublishDate"
     static let askAlbumKey = "askAlbum"
+    static let albumPrefixesKey = "albumPrefixes"
+
+    /// 相册名里 ID 前面的写法（按用户习惯：小红书 xhs_、X x_@、Instagram ins_@、B 站 UID:）
+    static let defaultPrefixes: [String: String] = [
+        "小红书": "xhs_", "X": "x_@", "Instagram": "ins_@", "哔哩哔哩": "UID:",
+    ]
+    /// 设置页里列出来可以改前缀的平台
+    static let prefixPlatforms = ["小红书", "抖音", "X", "Instagram", "哔哩哔哩", "微博", "YouTube", "TikTok"]
+
+    static var albumPrefixes: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: albumPrefixesKey) as? [String: String] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: albumPrefixesKey) }
+    }
+
+    /// 没设置过的平台用「平台名_」
+    static func idPrefix(for platform: String) -> String {
+        albumPrefixes[platform] ?? defaultPrefixes[platform] ?? "\(platform)_"
+    }
 
     static var imageFormat: ImageFormat {
         ImageFormat(rawValue: UserDefaults.standard.string(forKey: imageFormatKey) ?? "") ?? .heic
