@@ -66,12 +66,16 @@ jobs:
       - name: Build
         run: |
           set -o pipefail
+          # 每次编译的版本号都不一样（1.2.运行序号），AltStore 靠它判断有没有新版
+          BASE=$(grep -m1 "MARKETING_VERSION = " XHSSaver.xcodeproj/project.pbxproj | grep -oE "[0-9]+([.][0-9]+)*" | head -1)
           xcodebuild \
             -project XHSSaver.xcodeproj \
             -target XHSSaver \
             -configuration Release \
             -sdk iphoneos \
             SYMROOT="$PWD/build" \
+            MARKETING_VERSION="${BASE:-1.2}.${GITHUB_RUN_NUMBER}" \
+            CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -111,6 +115,9 @@ jobs:
           cp -R build/Release-iphoneos/XHSSaver.app Payload/
           zip -qry XHSSaver.ipa Payload
           ls -l XHSSaver.ipa
+          # AltStore 的源文件：版本号等信息直接从刚打好的包里读
+          python -B tools/make_source.py XHSSaver.ipa apps.json "$(git log -1 --pretty=%s)（${GITHUB_SHA:0:7}）"
+          python -c "import json; json.load(open('apps.json', encoding='utf-8'))"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
@@ -124,15 +131,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TITLE="最新版（$(date -u +%Y-%m-%d) · ${GITHUB_SHA:0:7}）"
-          NOTES="未签名的 ipa。下载后用 AltServer 的 Sideload .ipa 安装，或存到手机「文件」里用 AltStore 安装。"
+          NOTES="未签名的 ipa。在 AltStore 里添加源 https://github.com/${GITHUB_REPOSITORY}/releases/download/latest/apps.json 之后可以直接点 Update 更新；也可以把 ipa 存到手机「文件」里用 AltStore 的「+」安装。"
           if gh release view latest >/dev/null 2>&1; then
             # 原地更新：下载链接不会中途失效。先换文件，最后才改标题（标题里的 sha 变了 = 新包已就绪）
             git tag -f latest "$GITHUB_SHA"
             git push -f origin refs/tags/latest
             gh release upload latest XHSSaver.ipa --clobber
+            gh release upload latest apps.json --clobber
             gh release edit latest --target "$GITHUB_SHA" --title "$TITLE" --notes "$NOTES"
           else
-            gh release create latest XHSSaver.ipa --target "$GITHUB_SHA" --title "$TITLE" --notes "$NOTES"
+            gh release create latest XHSSaver.ipa apps.json --target "$GITHUB_SHA" --title "$TITLE" --notes "$NOTES"
           fi
 
       - name: Upload build log

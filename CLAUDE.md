@@ -17,6 +17,7 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 - Swift 5 模式。`@Sendable` 闭包里不要改外面的 `var`（用 `PhotoSaver.swift` 里的 `Box`）；不要写 `guard let (a, b) = 可选元组`。
 - `Info.plist` 的基础名必须是纯英文，中文名写在 `zh-Hans.lproj/InfoPlist.strings`；`NSPhotoLibraryUsageDescription` 不能删（申请完整相册权限时会闪退）。
 - release 标题格式「最新版（日期 · 7 位提交号）」不能变，仓库外的脚本靠它判断新包是否就绪。
+- 版本号由 CI 定：`1.2.运行序号`（`gen_project.py` 里的 `MARKETING_VERSION` 是前两段）。release 里的 `apps.json` 是 AltStore 的源，由 `tools/make_source.py` 从打好的 ipa 生成；AltStore 会核对包里的版本号、Bundle ID 和源里写的是否一致，所以不要手写。
 - 新增一种「等用户回答」的界面时，必须在 `SaveService.cancel()` 里加上收掉它的那一行（见 architecture.md 第 2 节）。
 - 进度信息默认算细节：`service.say(…, detail: true)`。只有「解析到了什么、存了什么、哪里失败」才不带 `detail`。
 - 登录、cookie 相关的界面只放在设置页，不要在下载流程里弹登录页。

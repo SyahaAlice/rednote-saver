@@ -77,6 +77,10 @@ iOS App 只能在 macOS 上编译，所以借用 GitHub 提供的 macOS 机器�
 9. 两种方式，任选一种：
    - **电脑上装**：点任务栏 AltServer 图标，按住 `Shift` 点 **Sideload .ipa…**（新版本直接点 **Sideload .ipa…**），选择你的 iPhone 和 `XHSSaver.ipa`。
    - **手机上装**：把 `XHSSaver.ipa` 存到手机「文件」App 里，打开 AltStore → **My Apps** → 左上角 **+** → 选择这个 ipa。
+   - **以后更新不用传文件**：在 AltStore 的 **Sources** 里点 **+**，填入下面的地址添加一次。之后每次有新版，**My Apps** 顶部会出现它，点 **Update** 就装好了（电脑上的 AltServer 要开着，和手机在同一个 Wi-Fi）。
+     `https://github.com/SyahaAlice/rednote-saver/releases/download/latest/apps.json`
+
+> 安装和续签尽量只用一边：要么都在手机的 AltStore 里做，要么都在电脑的 AltServer 里做。两边各自登录 Apple ID 可能各申请一张签名证书，免费账号只能有一张有效，新的会让旧的作废，用旧证书装的 App 会提示「不再可用」，需要重新安装（不要先删除 App，覆盖安装能保留数据）。
 10. 第一次打开 App、点保存时，会询问「添加照片」权限，选**允许**。
 
 > **安装报错怎么办**
