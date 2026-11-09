@@ -40,6 +40,9 @@ jobs:
           python -m pip install --no-deps --target app_packages yt-dlp certifi
           python -c "import sys; sys.path.insert(0, 'app_packages'); import yt_dlp; print('yt-dlp', yt_dlp.version.__version__)"
           # 预编译 .pyc（与手机上的 Python 3.13 同一版本），加快启动
+          # 先删掉标准库里用不到的目录（test 里有故意写错语法的文件，会让预编译报错）
+          STD=Python.xcframework/lib/python3.13
+          rm -rf "$STD/test" "$STD/idlelib" "$STD/tkinter" "$STD/turtledemo" "$STD/ensurepip" "$STD/pydoc_data" "$STD/lib2to3"
           python -m compileall -q -j 0 --invalidation-mode unchecked-hash app app_packages Python.xcframework/lib
 
       - name: Build
