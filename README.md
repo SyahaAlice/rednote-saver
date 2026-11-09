@@ -29,7 +29,9 @@ iOS App 只能在 macOS 上编译，所以借用 GitHub 提供的 macOS 机器�
    - **公开仓库**：macOS 编译完全免费，不限分钟数。代码别人能看到，但里面没有任何账号、密码或密钥。
    - **私有仓库**：免费账号每月 2000 分钟额度，macOS 按 **10 倍**消耗，相当于每月约 200 分钟；一次编译大约 3–5 分钟，够用。
 2. 每次推送代码都会自动编译。也可以在仓库的 **Actions → Build unsigned IPA → Run workflow** 手动运行。
-3. 编译完成后，打开那次运行记录，在页面底部 **Artifacts** 下载 `XHSSaver-ipa`，解压得到 `XHSSaver.ipa`。
+3. 编译完成后，main 分支的 ipa 会自动发布到仓库的 **Releases → latest**，直接下载 `XHSSaver.ipa` 即可，不用登录：
+   `https://github.com/SyahaAlice/rednote-saver/releases/download/latest/XHSSaver.ipa`
+   - 每次运行记录页面底部的 **Artifacts** 里也有一份（需要登录 GitHub 才能下载）。
 
 ## 二、第一次安装（只需做一次，约 30–40 分钟）
 

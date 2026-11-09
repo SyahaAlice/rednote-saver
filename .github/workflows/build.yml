@@ -6,6 +6,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write  # 用来更新 latest 发布页，ipa 可直接下载
+
 jobs:
   build:
     runs-on: macos-15
@@ -49,6 +52,17 @@ jobs:
         with:
           name: XHSSaver-ipa
           path: XHSSaver.ipa
+
+      - name: Publish to the "latest" release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest XHSSaver.ipa \
+            --target "$GITHUB_SHA" \
+            --title "最新版（$(date -u +%Y-%m-%d) · ${GITHUB_SHA:0:7}）" \
+            --notes "未签名的 ipa。下载后用 AltServer 的 Sideload .ipa 安装，或存到手机「文件」里用 AltStore 安装。"
 
       - name: Upload build log
         if: always()
