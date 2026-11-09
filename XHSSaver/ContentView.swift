@@ -30,6 +30,9 @@ struct ContentView: View {
         .sheet(item: $service.capture) { cap in
             DouyinCaptureView(capture: cap)
         }
+        .sheet(item: $service.loginAccount, onDismiss: { service.loginFinished() }) { a in
+            WebLoginView(account: a)
+        }
         .onAppear { CookiePool.prepareFolder() }
     }
 }
@@ -50,9 +53,15 @@ struct DownloadView: View {
                             if let s = strings.first { text = s }
                         }
                         Spacer()
+                        Button("补登") {
+                            let input = text
+                            Task { await service.quickLogin(text: input) }
+                        }
+                        .disabled(NoteParser.extractURL(text) == nil || service.isRunning)
                         Button("清空") { text = "" }
                             .disabled(text.isEmpty)
                     }
+                    .buttonStyle(.borderless)
                 }
 
                 Section {

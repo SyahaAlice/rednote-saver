@@ -61,6 +61,10 @@ struct WebLoginView: View {
                 }
             }
         }
+        .onDisappear {
+            // 不管点「完成」还是「取消」，已经登录的状态都导出一次到号池
+            Task { await WebAccounts.shared.exportCookies(account) }
+        }
         .onAppear {
             // 抖音用桌面版网页（手机版页面拿不到作品数据）
             let web = makeWebView(for: account, desktop: account.site == "douyin.com")

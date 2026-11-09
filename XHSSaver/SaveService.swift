@@ -36,6 +36,9 @@ final class SaveService: ObservableObject {
     @Published var albumRequest: AlbumRequest?
     /// 抖音读取作品时弹出的内置浏览器
     @Published var capture: DouyinCapture?
+    /// 补登：弹出某个账号的内置浏览器登录页
+    @Published var loginAccount: WebAccount?
+    private var loginContinuation: CheckedContinuation<Void, Never>?
 
     private var promptContinuation: CheckedContinuation<Int?, Never>?
     private var albumContinuation: CheckedContinuation<AlbumDecision, Never>?
@@ -68,6 +71,36 @@ final class SaveService: ObservableObject {
         albumContinuation = nil
     }
 
+    /// 弹出内置浏览器让用户登录（补登），关掉后 cookie 已写进号池
+    func runLogin(_ account: WebAccount) async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            loginContinuation = c
+            loginAccount = account
+        }
+    }
+
+    func loginFinished() {
+        loginAccount = nil
+        loginContinuation?.resume()
+        loginContinuation = nil
+    }
+
+    /// 下载页的「补登」按钮：登录输入框里那个链接所属的网站
+    func quickLogin(text: String) async {
+        guard let url = NoteParser.extractURL(text) else { return }
+        let account = WebAccounts.shared.accountForLogin(url: url)
+        await runLogin(account)
+        let n = await WebAccounts.shared.exportCookies(account)
+        say("已更新「\(account.name)」的 cookie（\(n) 条）")
+    }
+
+    /// 失败信息看起来像是需要登录 / cookie 失效
+    private func looksLikeAuth(_ error: Error) -> Bool {
+        let s = error.localizedDescription.lowercased()
+        return ["login", "log in", "sign in", "cookie", "403", "401", "登录", "验证", "private", "需要登录"]
+            .contains { s.contains($0) }
+    }
+
     /// 弹出抖音内置浏览器并等它读到作品数据
     func runCapture(_ cap: DouyinCapture) async throws -> [String: Any] {
         capture = cap
@@ -88,15 +121,34 @@ final class SaveService: ObservableObject {
         do {
             guard let url = NoteParser.extractURL(text) else { throw XHSError("没找到链接") }
             try await PhotoSaver.ensureAccess()
-            let note = try await Extractors.pick(for: url).extract(url, service: self)
-            defer { if let d = note.workDir { try? FileManager.default.removeItem(at: d) } }
-            let summary = try await save(note)
+            let summary: String
+            do {
+                summary = try await attempt(url)
+            } catch {
+                // 失败时可以直接在内置浏览器里补登这个网站，登录后自动重试一次
+                let site = CookiePool.site(of: url.host ?? "")
+                say("失败：" + error.localizedDescription)
+                let reason = looksLikeAuth(error) ? "看起来需要登录，或者号池里的 cookie 已失效。" : "下载失败了。"
+                guard await ask("\(site) 没有保存成功", reason + "要用内置浏览器登录（补登）\(site)后重试吗？",
+                                options: ["登录后重试"], cancel: "不用了") != nil else { throw error }
+                let account = WebAccounts.shared.accountForLogin(url: url)
+                await runLogin(account)
+                let n = await WebAccounts.shared.exportCookies(account)  // 等 cookie 写进号池再重试
+                say("已更新「\(account.name)」的 cookie（\(n) 条），重试…")
+                summary = try await attempt(url)
+            }
             say("✅ " + summary)
             return summary
         } catch {
             say("❌ " + error.localizedDescription)
             throw error
         }
+    }
+
+    private func attempt(_ url: URL) async throws -> String {
+        let note = try await Extractors.pick(for: url).extract(url, service: self)
+        defer { if let d = note.workDir { try? FileManager.default.removeItem(at: d) } }
+        return try await save(note)
     }
 
     private func save(_ note: ParsedNote) async throws -> String {

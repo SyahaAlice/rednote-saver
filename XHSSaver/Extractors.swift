@@ -51,7 +51,8 @@ struct DouyinExtractor: SiteExtractor {
         service.say("解析抖音链接…")
         let ref = try await Douyin.resolve(url)
         guard let account = WebAccounts.shared.accounts(for: "douyin.com").first else {
-            throw XHSError("抖音需要登录：请先到「设置 → 账号」添加一个抖音账号并登录")
+            // 失败后 SaveService 会提示「登录后重试」，直接带到抖音登录页
+            throw XHSError("抖音需要登录：还没有抖音账号")
         }
         service.say("用账号「\(account.name)」在内置浏览器里读取作品…")
         let detail = try await service.runCapture(DouyinCapture(account: account, target: ref))

@@ -56,6 +56,17 @@ final class WebAccounts: ObservableObject {
         if let data = try? enc.encode(accounts) { try? data.write(to: listFile, options: .atomic) }
     }
 
+    /// 补登用：这个网址所属网站已有账号就用第一个，没有就新建一个（常用网站用预设登录页，其它用网站首页）
+    func accountForLogin(url: URL) -> WebAccount {
+        let site = CookiePool.site(of: url.host ?? "")
+        if let a = accounts(for: site).first { return a }
+        if let preset = SitePreset.all.first(where: { $0.site == site }) {
+            return add(name: preset.title, preset: preset)
+        }
+        let home = URL(string: "https://\(url.host ?? site)/") ?? url
+        return add(name: site, url: home)
+    }
+
     func accounts(for site: String) -> [WebAccount] {
         accounts.filter { $0.site == site || site.hasSuffix("." + $0.site) || $0.site.hasSuffix("." + site) }
     }
