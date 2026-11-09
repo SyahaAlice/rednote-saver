@@ -10,13 +10,17 @@ struct SaveNoteIntent: AppIntent {
     @Parameter(title: "链接或分享文案")
     var text: String
 
+    /// 打开 = 快速保存（不预览、不选相册，全部保存）；关闭 = 和 App 里的「解析」一样先预览
+    @Parameter(title: "快速保存", default: false)
+    var quick: Bool
+
     static var parameterSummary: some ParameterSummary {
         Summary("下载 \(\.$text) 到相册")
     }
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let summary = try await SaveService.shared.save(text: text)
+        let summary = try await SaveService.shared.save(text: text, mode: quick ? .quick : .organize)
         return .result(value: summary, dialog: IntentDialog(stringLiteral: summary))
     }
 }

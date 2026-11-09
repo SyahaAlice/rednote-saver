@@ -12,5 +12,19 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<!-- 后台继续下载（iOS 26 起，见 BackgroundRun.swift）：任务名要在这里登记。
+	     侧载工具可能在 Bundle ID 后面加一段，所以另外登记一个带通配符的 -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.personal.xhssaver.save</string>
+		<string>com.personal.xhssaver.*</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>processing</string>
+	</array>
+	<!-- 用新版 Xcode 编译后，界面保持原来的样子（不自动换成新的系统外观） -->
+	<key>UIDesignRequiresCompatibility</key>
+	<true/>
 </dict>
 </plist>

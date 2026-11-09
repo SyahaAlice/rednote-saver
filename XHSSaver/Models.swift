@@ -38,6 +38,21 @@ struct NoteMedia {
     var preview: URL?
     /// 这一项在解析 / 下载阶段就已经失败（yt-dlp 多项帖子里的某一项）：保存时直接算作失败并显示这句说明
     var error: String?
+
+    /// 这一项的下载直链（首选地址；实况图再加上它的动态视频）。还没解析出地址的项（yt-dlp 的占位）为空
+    var directLinks: [URL] {
+        var out = Array(original.prefix(1))
+        if kind == .live { out += liveVideoURLs.prefix(1) }
+        return out
+    }
+}
+
+/// 下载页的两个入口
+enum SaveMode {
+    /// 快速保存：不预览、不选相册，链接里的内容全部保存，视频取最高清晰度
+    case quick
+    /// 解析：先预览（勾选、选清晰度），再选相册，然后保存
+    case organize
 }
 
 /// 作者信息：昵称可能重复，ID 通常唯一。ids 里放这个平台上所有能用来识别作者的 ID
@@ -65,8 +80,25 @@ struct ParsedNote {
     var workDir: URL?
     /// 还没下载的作品（yt-dlp）：解析时只拿到标题、作者等信息，
     /// 预览、查重和选相册之后才调用它真正下载，返回的媒体项替换 items。
-    /// 参数是用户在预览页选中的项（items 的下标）；nil = 没有经过预览，按全部处理
-    var fetch: (@MainActor (Set<Int>?) async throws -> [NoteMedia])?
+    /// 参数：用户在预览页选中的项（items 的下标；nil = 没有经过预览，按全部处理），
+    /// 和选的视频清晰度（画面高度，0 = 最高）
+    var fetch: (@MainActor (Set<Int>?, Int) async throws -> [NoteMedia])?
+    /// 视频可选的清晰度（画面高度，从高到低）。只有 yt-dlp 的作品有；少于两档就不用选
+    var heights: [Int] = []
+    /// yt-dlp 的作品：每种清晰度下每一项的下载直链（0 = 最高清晰度）
+    var linksByHeight: [Int: [[URL]]] = [:]
+
+    /// 下载直链：selection 是选中的项（nil = 全部），height 是选的清晰度
+    func links(selection: Set<Int>?, height: Int) -> [String] {
+        let table = linksByHeight[height] ?? linksByHeight[0] ?? []
+        var out: [String] = []
+        for (i, item) in items.enumerated() where selection?.contains(i) ?? true {
+            let own = item.directLinks
+            let urls = own.isEmpty && i < table.count ? table[i] : own
+            out += urls.map { $0.absoluteString }
+        }
+        return out
+    }
 
     var historyKey: String { "\(platform):\(id)" }
 }
@@ -87,7 +119,6 @@ enum Prefs {
 
     static let imageFormatKey = "imageFormat"
     static let usePublishDateKey = "usePublishDate"
-    static let askAlbumKey = "askAlbum"
     static let albumPrefixesKey = "albumPrefixes"
 
     /// 相册名里 ID 前面的写法（按用户习惯：小红书 xhs_、X x_@、Instagram ins_@、B 站 UID:）
@@ -143,12 +174,6 @@ enum Prefs {
     }
     static var usePublishDate: Bool { UserDefaults.standard.bool(forKey: usePublishDateKey) }
 
-    /// 保存前预览（解析完先看一眼、勾选要保存的项）；默认开启
-    static let previewBeforeSaveKey = "previewBeforeSave"
-    static var previewBeforeSave: Bool {
-        UserDefaults.standard.object(forKey: previewBeforeSaveKey) as? Bool ?? true
-    }
-
     /// B 站视频的封面怎么处理
     enum BiliCover: String, CaseIterable, Identifiable {
         case withVideo, only, off
@@ -167,31 +192,6 @@ enum Prefs {
         BiliCover(rawValue: UserDefaults.standard.string(forKey: biliCoverKey) ?? "") ?? .withVideo
     }
 
-    /// 一个链接最多保存多少项（主页、合集这类链接用得上）；0 = 不限。默认 100
-    static let maxEntriesKey = "maxEntries"
-    static let maxEntriesChoices = [
-        HeightChoice(height: 100, title: "100 项"), HeightChoice(height: 500, title: "500 项"),
-        HeightChoice(height: 2000, title: "2000 项"), HeightChoice(height: 0, title: "不限"),
-    ]
-    static var maxEntries: Int {
-        (UserDefaults.standard.object(forKey: maxEntriesKey) as? Int).map { max(0, $0) } ?? 100
-    }
-
-    /// yt-dlp 下载视频的清晰度上限（画面高度）；0 = 不限，取网站给的最高清晰度（默认）
-    static let maxVideoHeightKey = "maxVideoHeight"
-    struct HeightChoice: Identifiable {
-        let height: Int
-        let title: String
-        var id: Int { height }
-    }
-    static let maxVideoHeightChoices = [
-        HeightChoice(height: 0, title: "不限（最高清晰度）"), HeightChoice(height: 2160, title: "最高 4K（2160p）"),
-        HeightChoice(height: 1440, title: "最高 2K（1440p）"), HeightChoice(height: 1080, title: "最高 1080p"),
-        HeightChoice(height: 720, title: "最高 720p"),
-    ]
-    static var maxVideoHeight: Int { max(0, UserDefaults.standard.integer(forKey: maxVideoHeightKey)) }
-    /// 默认开启
-    static var askAlbum: Bool { UserDefaults.standard.object(forKey: askAlbumKey) as? Bool ?? true }
 }
 
 /// 下载记录：只记「平台:作品ID → 保存时间」，一万条也不到 1 MB；放在 App 内部数据里，不出现在「文件」App

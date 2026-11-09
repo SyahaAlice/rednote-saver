@@ -3,17 +3,15 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject private var web = WebAccounts.shared
     @ObservedObject private var service = SaveService.shared
-    @AppStorage(Prefs.previewBeforeSaveKey) private var previewBeforeSave = true
     @State private var loginAccount: WebAccount?
     @State private var showAdd = false
     /// 号池文件夹里的所有 cookies 文件（App 内登录导出的 + 电脑导入的）
     @State private var pool: [CookiePool.Summary] = []
     @AppStorage(Prefs.imageFormatKey) private var imageFormat = Prefs.ImageFormat.heic.rawValue
     @AppStorage(Prefs.usePublishDateKey) private var usePublishDate = false
-    @AppStorage(Prefs.askAlbumKey) private var askAlbum = true
-    @AppStorage(Prefs.maxVideoHeightKey) private var maxVideoHeight = 0
     @AppStorage(Prefs.biliCoverKey) private var biliCover = Prefs.BiliCover.withVideo.rawValue
-    @AppStorage(Prefs.maxEntriesKey) private var maxEntries = 100
+    /// 账号一节的详细说明平时收起
+    @State private var showAccountHelp = false
     @State private var historyCount = History.count
     @State private var confirmClearHistory = false
     /// 相册命名的两组设置平时很少改，默认收起
@@ -39,18 +37,10 @@ struct SettingsView: View {
                     Picker("小红书图片格式", selection: $imageFormat) {
                         ForEach(Prefs.ImageFormat.allCases) { f in Text(f.title).tag(f.rawValue) }
                     }
-                    Picker("其它网站视频清晰度", selection: $maxVideoHeight) {
-                        ForEach(Prefs.maxVideoHeightChoices) { c in Text(c.title).tag(c.height) }
-                    }
-                    Picker("一个链接最多保存", selection: $maxEntries) {
-                        ForEach(Prefs.maxEntriesChoices) { c in Text(c.title).tag(c.height) }
-                    }
                     Picker("B 站封面", selection: $biliCover) {
                         ForEach(Prefs.BiliCover.allCases) { c in Text(c.title).tag(c.rawValue) }
                     }
                     Toggle("照片日期用作品发布时间", isOn: $usePublishDate)
-                    Toggle("保存前预览", isOn: $previewBeforeSave)
-                    Toggle("保存前选择相册", isOn: $askAlbum)
                     HStack {
                         Text("下载记录：\(historyCount) 条")
                         Spacer()
@@ -60,15 +50,7 @@ struct SettingsView: View {
                 } header: {
                     Label("保存", systemImage: "square.and.arrow.down")
                 } footer: {
-                    Text("""
-                    图片格式：HEIC 是小红书原图本身，体积最小；JPEG / PNG 由小红书服务器从原图转换，分辨率不变。
-                    保存前预览：解析完先列出这个作品里的图片和视频，勾选后才开始下载；关掉就解析完直接保存。
-                    视频清晰度：用 yt-dlp 下载的网站（B 站、YouTube 等）默认取能拿到的最高清晰度；4K 文件很大，想省空间可以设上限。小红书、抖音、快手、Instagram、X、微博的图片和视频始终取最高的。
-                    一个链接最多保存：只对主页、合集、播放列表这类一个链接里有很多作品的情况起作用，超过 20 项时还会先问你；选「不限」就没有上限。
-                    B 站封面：保存 B 站视频时把封面图（原始尺寸）也存进同一个相册；选「只保存封面」就不下载视频。
-                    选择相册需要「完整照片访问」权限（要读取已有相册名）：会按作者 ID 找已有相册，找不到就按「作者名字（平台名_作者ID）」新建。
-                    下载记录只存平台和作品 ID，保存过的作品再存时会先问你。
-                    """)
+                    Text("HEIC 是小红书存的原文件；JPEG / PNG 由小红书服务器转换，分辨率不变。")
                 }
 
                 Section {
@@ -121,13 +103,11 @@ struct SettingsView: View {
                     }
                 } header: {
                     Label("相册命名", systemImage: "rectangle.stack.badge.person.crop")
-                } footer: {
-                    Text("点开可以改每个平台的 ID 前缀和相册名模板。")
                 }
 
                 Section {
                     if rows.isEmpty {
-                        Text("还没有账号：所有网站都以游客身份下载。抖音和 Instagram 帖子必须登录才能保存；其它网站登录后能拿到更多内容。")
+                        Text("还没有账号，以游客身份下载。抖音和 Instagram 必须登录。")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(rows) { row in
@@ -152,18 +132,22 @@ struct SettingsView: View {
                         .disabled(checking || !pool.contains { $0.sites.contains("xiaohongshu.com") })
                     }
                     .buttonStyle(.borderless)
+                    DisclosureGroup(isExpanded: $showAccountHelp) {
+                        Text("""
+                        点「添加账号」在内置浏览器里登录；cookie 失效时点「重新登录」。
+                        也可以从电脑导入 Netscape 格式的 cookies 文件：
+                        opendevice afc push --app \(bundleID) 本地文件 /Documents/cookies/
+                        或者放进「文件 → 我的 iPhone → 多功能媒体下载器 → cookies」，再点「重新读取」。
+                        不用的账号左滑删除。这里只显示名称和网站，不显示 cookie 内容。
+                        """)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    } label: {
+                        Text("说明").font(.footnote).foregroundStyle(.secondary)
+                    }
                 } header: {
                     Label("账号", systemImage: "person.crop.circle.badge.checkmark")
-                } footer: {
-                    Text("""
-                    这里是下载时会用到的所有账号（号池），两种来源放在一起：
-                    · App 内登录：点「添加账号」在内置浏览器里登录，每个账号的登录状态互相独立；cookie 失效时点「重新登录」。
-                    · 电脑导入：用 merge_cookies.py 整理好 Netscape 格式的 .txt，推到 App 的 cookies 文件夹：
-                    opendevice afc push --app \(bundleID) 本地文件 /Documents/cookies/
-                    也可以在「文件 → 我的 iPhone → 多功能媒体下载器 → cookies」里直接放进去，然后点「重新读取」。
-                    只有失效或未激活的账号会提示补登。电脑导入的文件补登后会多出一个 App 内登录的账号，原来的文件还在，确认不用了可以左滑删除。只显示名称和网站，不显示 cookie 内容。
-                    """)
-                    .textSelection(.enabled)
                 }
 
                 Section {
@@ -203,7 +187,7 @@ struct SettingsView: View {
                 } header: {
                     Label("下载器", systemImage: "shippingbox")
                 } footer: {
-                    Text("视频用内置的 yt-dlp，图片和图文混排用内置的 gallery-dl，两个都是开源项目。网站改版导致保存失败时，先点「更新」：yt-dlp 从它的官方 GitHub 下载，gallery-dl 从 Python 官方软件源下载并校验。")
+                    Text("保存失败时先试试更新。")
                 }
 
                 Section {

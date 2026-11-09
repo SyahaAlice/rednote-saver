@@ -2,8 +2,8 @@ import ImageIO
 import SwiftUI
 import UIKit
 
-/// 「先提取，预览，然后下载」里的预览：解析完、下载之前，把这个作品里有什么列给用户看，
-/// 用户勾选要保存的项后才开始下载。在「设置 → 保存 → 保存前预览」里可以关掉。
+/// 「解析」之后的预览：下载之前把这个作品里有什么列给用户看，
+/// 勾选要保存的项、选视频清晰度，点「保存到相册」才开始下载（之后是选相册）。
 struct PreviewRequest: Identifiable {
     let id = UUID()
     let platform: String
@@ -14,6 +14,18 @@ struct PreviewRequest: Identifiable {
     let referer: String
     /// 之前保存过的话，上次保存的时间
     let savedBefore: Date?
+    /// 视频可选的清晰度（画面高度，从高到低）；少于两档就不显示选择
+    let heights: [Int]
+    /// 选中的项和清晰度对应的下载直链
+    let links: (Set<Int>, Int) -> [String]
+}
+
+/// 用户在预览页的决定
+struct PreviewChoice {
+    /// 选中的项（items 的下标）
+    var selection: Set<Int>
+    /// 视频清晰度（画面高度），0 = 最高
+    var height: Int
 }
 
 /// 预览用的缩略图：下载一张小图（没有小图就用原图），缩到几百像素再显示，不占太多内存
@@ -108,10 +120,61 @@ private struct PreviewTile: View {
     }
 }
 
+/// 下载直链：平时收起，点开能看到每一条，点一下复制；「复制全部」一直在
+struct LinksSection: View {
+    let links: [String]
+    @State private var open = false
+    @State private var copied = ""
+
+    var body: some View {
+        if !links.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Button {
+                        withAnimation { open.toggle() }
+                    } label: {
+                        Label("下载直链（\(links.count)）", systemImage: open ? "chevron.down" : "chevron.right")
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("links")
+                    Spacer()
+                    Button(copied == "all" ? "已复制" : "复制全部") {
+                        UIPasteboard.general.string = links.joined(separator: "\n")
+                        copied = "all"
+                    }
+                    .font(.subheadline)
+                    .accessibilityIdentifier("links-copy")
+                }
+                if open {
+                    ForEach(Array(links.enumerated()), id: \.offset) { i, link in
+                        Button {
+                            UIPasteboard.general.string = link
+                            copied = link
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text("\(i + 1)").foregroundStyle(.secondary)
+                                Text(link).lineLimit(1).truncationMode(.middle)
+                                Spacer(minLength: 0)
+                                Image(systemName: copied == link ? "checkmark" : "doc.on.doc")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .font(.caption.monospaced())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct PreviewView: View {
     let request: PreviewRequest
     @ObservedObject private var service = SaveService.shared
     @State private var selection: Set<Int> = []
+    /// 视频清晰度（画面高度），0 = 最高
+    @State private var height = 0
 
     private var counts: String {
         var images = 0, lives = 0, videos = 0
@@ -138,21 +201,31 @@ struct PreviewView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(request.title.isEmpty ? "（没有标题）" : request.title)
                             .font(.headline)
-                            .lineLimit(3)
-                        if let a = request.author {
-                            Label(a.primaryID.isEmpty ? a.name : "\(a.name)（\(a.primaryID)）",
-                                  systemImage: "person.crop.circle")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        Text("\(request.platform) · \(counts)")
+                            .lineLimit(2)
+                        Text([request.author?.name ?? "", request.platform, counts]
+                            .filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         if let last = request.savedBefore {
-                            Label("这个作品保存过，上次是 \(last.formatted(date: .abbreviated, time: .shortened))",
+                            Label("保存过：\(last.formatted(date: .abbreviated, time: .shortened))",
                                   systemImage: "clock.arrow.circlepath")
                                 .font(.footnote)
                                 .foregroundStyle(.orange)
+                        }
+                    }
+                    if request.heights.count > 1 {
+                        // 一次对这个链接里的所有视频生效；默认最高
+                        HStack {
+                            Text("视频清晰度").font(.subheadline)
+                            Spacer()
+                            Picker("视频清晰度", selection: $height) {
+                                Text("最高（\(request.heights[0])p）").tag(0)
+                                ForEach(Array(request.heights.dropFirst()), id: \.self) { h in
+                                    Text("\(h)p").tag(h)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .accessibilityIdentifier("preview-quality")
                         }
                     }
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
@@ -168,18 +241,19 @@ struct PreviewView: View {
                                 }
                         }
                     }
-                    Text("点一下可以取消或重新勾选某一项。这里显示的是缩略图，保存的是原图 / 最高清晰度。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    LinksSection(links: request.links(selection, height))
                 }
                 .padding(16)
             }
             .safeAreaInset(edge: .bottom) {
                 Button {
-                    service.decidePreview(selection)
+                    service.decidePreview(PreviewChoice(selection: selection, height: height))
                 } label: {
-                    Label(request.savedBefore == nil ? "保存 \(selection.count) 项" : "再保存一次（\(selection.count) 项）",
+                    Label(request.savedBefore == nil ? "保存到相册（\(selection.count) 项）"
+                                                     : "再保存一次（\(selection.count) 项）",
                           systemImage: "square.and.arrow.down.fill")
+                        .font(.title3.weight(.bold))
+                        .padding(.vertical, 4)
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(selection.isEmpty)

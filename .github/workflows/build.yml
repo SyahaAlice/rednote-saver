@@ -31,7 +31,14 @@ jobs:
           python-version: "3.13"
 
       - name: Xcode version
-        run: xcodebuild -version
+        run: |
+          # 后台继续下载用到 iOS 26 的接口，需要 Xcode 26 以上；机器上有就选最新的正式版，没有就用默认的
+          # （代码里用 #if compiler(>=6.2) 隔开了，旧版 Xcode 也能编译，只是没有后台继续）
+          NEW=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -viE "beta|rc|preview" | sort -V | tail -1 || true)
+          MAJOR=$(basename "${NEW:-Xcode_0}" .app | sed -E 's/^Xcode_([0-9]+).*/\1/')
+          if [ -n "$NEW" ] && [ "$MAJOR" -ge 26 ]; then sudo xcode-select -s "$NEW/Contents/Developer"; fi
+          xcodebuild -version
+          echo "::notice::$(xcodebuild -version | tr '\n' ' ')"
 
       - name: Fetch Python for iOS
         run: |

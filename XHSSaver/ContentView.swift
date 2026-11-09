@@ -49,16 +49,20 @@ struct DownloadView: View {
     @State private var showDetails = false
     @FocusState private var editing: Bool
 
+    private var empty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
                     header
                     inputCard
-                    saveButton
+                    actionButtons
                     if service.isRunning { cancelButton }
                     if !service.log.isEmpty { progressCard }
-                    featuresCard
+                    if !service.links.isEmpty {
+                        Card { LinksSection(links: service.links) }
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
@@ -82,24 +86,19 @@ struct DownloadView: View {
                     .foregroundStyle(.white)
             }
             .shadow(color: Theme.violet.opacity(0.35), radius: 10, y: 5)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("多功能媒体下载器")
-                    .font(.title2.weight(.bold))
-                Text("小红书 · 抖音 · B 站 · 微博 · X · YouTube …")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            Text("多功能媒体下载器")
+                .font(.title2.weight(.bold))
             Spacer(minLength: 0)
         }
         .padding(.top, 12)
     }
 
-    // 输入框 + 粘贴 / 清空（登录、cookie 相关的都在「设置 → 账号」）
+    // 输入框 + 粘贴 / 清空（两个按钮挨在一起）
     private var inputCard: some View {
         Card {
             ZStack(alignment: .topLeading) {
                 if text.isEmpty {
-                    Text("粘贴链接或整段分享文案")
+                    Text("粘贴链接或分享文案")
                         .foregroundStyle(.tertiary)
                         .padding(.top, 8)
                         .padding(.leading, 5)
@@ -110,45 +109,61 @@ struct DownloadView: View {
                     .scrollContentBackground(.hidden)
                     .accessibilityIdentifier("input")
             }
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 PasteButton(payloadType: String.self) { strings in
                     if let s = strings.first { text = s }
                 }
                 .buttonBorderShape(.capsule)
                 .labelStyle(.titleAndIcon)
                 .tint(.accentColor)
-                Spacer()
                 Button {
                     text = ""
                 } label: {
-                    Image(systemName: "xmark")
+                    Label("清空", systemImage: "xmark")
                 }
                 .buttonStyle(ChipButtonStyle())
                 .disabled(text.isEmpty)
-                .accessibilityLabel("清空")
+                .accessibilityIdentifier("clear")
+                Spacer()
             }
         }
     }
 
-    private var saveButton: some View {
-        Button {
-            editing = false
-            let input = text
-            Task { _ = try? await service.save(text: input) }
-        } label: {
-            HStack(spacing: 8) {
-                if service.isRunning {
-                    ProgressView().tint(.white)
-                    Text("正在保存…")
-                } else {
-                    Image(systemName: "square.and.arrow.down.fill")
-                    Text("保存到相册")
+    private func start(_ mode: SaveMode) {
+        editing = false
+        let input = text
+        Task { _ = try? await service.save(text: input, mode: mode) }
+    }
+
+    // 两个入口：「解析」先预览、勾选、选相册；「快速保存」直接把链接里的内容全部存下来
+    private var actionButtons: some View {
+        HStack(spacing: 12) {
+            Button {
+                start(.organize)
+            } label: {
+                HStack(spacing: 8) {
+                    if service.isRunning {
+                        ProgressView().tint(.white)
+                        Text("正在处理…")
+                    } else {
+                        Image(systemName: "sparkle.magnifyingglass")
+                        Text("解析")
+                    }
                 }
             }
+            .buttonStyle(PrimaryButtonStyle())
+            .accessibilityIdentifier("parse")
+            if !service.isRunning {
+                Button {
+                    start(.quick)
+                } label: {
+                    Label("快速保存", systemImage: "bolt.fill")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .accessibilityIdentifier("quick-save")
+            }
         }
-        .buttonStyle(PrimaryButtonStyle())
-        .disabled(service.isRunning || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        .accessibilityIdentifier("save")
+        .disabled(service.isRunning || empty)
     }
 
     // 保存过程中随时可以停下（大视频下错了、弹窗卡住时用）
@@ -162,30 +177,24 @@ struct DownloadView: View {
         .accessibilityIdentifier("cancel")
     }
 
-    // 进度：时间线样式，最新一行加粗
+    // 进度：只显示现在的阶段和最近一条关键信息，其余收在「过程」里
     private var progressCard: some View {
         Card {
             HStack {
-                CardTitle(icon: "list.bullet.rectangle.portrait", text: "进度")
-                Spacer()
-                // 当前阶段：给人看的是中文，给自动化操作读的是固定的英文代号（辅助功能的值）
+                // 给人看的是中文，给自动化操作读的是固定的英文代号（辅助功能的值）
                 Text(service.phase.label)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .font(.headline)
                     .accessibilityIdentifier("phase")
                     .accessibilityValue(service.phase.code)
+                Spacer()
                 if service.isRunning { ProgressView().controlSize(.small) }
             }
             if case .saving(let index, let total) = service.phase, total > 1 {
                 ProgressView(value: Double(index - 1), total: Double(total))
                     .tint(Theme.violet)
             }
-            // 只列关键节点；细节（用哪个账号、下载百分比、每一项…）收在下面，点开才看
-            let lines = Array(service.log.suffix(30))
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
-                    LogRow(line: line, latest: i == lines.count - 1)
-                }
+            if let last = service.log.last {
+                LogRow(line: last, latest: true)
             }
             if service.isRunning, !service.latest.isEmpty, service.latest != service.log.last {
                 // 现在在干什么：只占一行，不断被最新的一条替换
@@ -196,7 +205,7 @@ struct DownloadView: View {
                     .truncationMode(.middle)
                     .accessibilityIdentifier("latest")
             }
-            if service.details.count > service.log.count {
+            if service.details.count > 1 {
                 DisclosureGroup(isExpanded: $showDetails) {
                     VStack(alignment: .leading, spacing: 3) {
                         ForEach(Array(service.details.suffix(200).enumerated()), id: \.offset) { _, line in
@@ -209,31 +218,12 @@ struct DownloadView: View {
                     }
                     .padding(.top, 4)
                 } label: {
-                    Text("完整过程（\(service.details.count) 行）")
+                    Text("过程")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityIdentifier("details")
             }
-        }
-    }
-
-    private var featuresCard: some View {
-        Card {
-            CardTitle(icon: "sparkles", text: "能做什么")
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    FeatureTag(icon: "photo", text: "原图 / 原片")
-                    FeatureTag(icon: "livephoto", text: "实况照片")
-                }
-                HStack(spacing: 8) {
-                    FeatureTag(icon: "rectangle.stack.badge.person.crop", text: "按作者归类相册")
-                    FeatureTag(icon: "globe", text: "yt-dlp 千余网站")
-                }
-            }
-            Text("解析完会先给你预览，勾选后才下载；原图拿不到时会先问你再改存替代版本。登录和账号在「设置 → 账号」。也可以在快捷指令里用「下载到相册」，配合分享菜单一键保存。")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
     }
 }
@@ -353,7 +343,7 @@ struct AlbumChoiceView: View {
                     Button {
                         search()
                     } label: {
-                        Label("按这些账号重新查找已有相册", systemImage: "magnifyingglass")
+                        Label("重新查找已有相册", systemImage: "magnifyingglass")
                     }
                 }
 
@@ -374,8 +364,6 @@ struct AlbumChoiceView: View {
                         }
                     } header: {
                         Text("已有相册")
-                    } footer: {
-                        Text("任何一个账号的 ID 出现在相册名里就算匹配。点一下确认后放入；「仅用户名匹配」可能是同名的其他作者。")
                     }
                 } else if searched {
                     Section {
@@ -384,9 +372,8 @@ struct AlbumChoiceView: View {
                     } header: {
                         Text("已有相册")
                     } footer: {
-                        Text(searchedTerms.isEmpty
-                             ? "上面的账号还没有填 ID 或用户名，没有可以查找的内容。"
-                             : "查找了相册名里包含这些内容的相册：\(searchedTerms.joined(separator: "、"))。少于 4 个字符的 ID 和少于 2 个字的用户名不参与查找（太容易误匹配）。可以改一下上面的账号再查，或者在下面新建相册。")
+                        Text(searchedTerms.isEmpty ? "先在上面填 ID 或用户名。"
+                             : "查找了：\(searchedTerms.joined(separator: "、"))")
                     }
                 }
 
@@ -401,16 +388,14 @@ struct AlbumChoiceView: View {
                     }
                     .disabled(albumName.trimmingCharacters(in: .whitespaces).isEmpty)
                 } header: {
-                    Text(matches.isEmpty ? "没有找到这个作者的相册，新建一个" : "或者另建新相册")
-                } footer: {
-                    Text("相册名随上面的账号自动生成（同一平台的排在一起），也可以直接改。前缀和模板在「设置 → 相册命名」里改。")
+                    Text(matches.isEmpty ? "新建相册" : "或者另建新相册")
                 }
 
                 Section {
-                    Button("不放入相册，直接保存") { service.decideAlbum(.none) }
+                    Button("不放入相册") { service.decideAlbum(.none) }
                 }
             }
-            .navigationTitle("放进哪个相册")
+            .navigationTitle("整理到相册")
             .navigationBarTitleDisplayMode(.inline)
             .disabled(working)
             .onAppear {

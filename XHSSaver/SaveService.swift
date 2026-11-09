@@ -99,7 +99,9 @@ final class SaveService: ObservableObject {
 
     private var promptContinuation: CheckedContinuation<Int?, Never>?
     private var albumContinuation: CheckedContinuation<AlbumDecision, Never>?
-    private var previewContinuation: CheckedContinuation<Set<Int>?, Never>?
+    private var previewContinuation: CheckedContinuation<PreviewChoice?, Never>?
+    /// 这次要下载的直链（解析完就有；预览页里改了勾选或清晰度后会更新）
+    @Published private(set) var links: [String] = []
     private var useFallbackForAll = false
     /// 正在跑的保存任务，「取消」时用
     private var current: Task<String, Error>?
@@ -145,23 +147,25 @@ final class SaveService: ObservableObject {
         albumContinuation = nil
     }
 
-    /// 弹出预览页，等用户勾选。返回选中的项（note.items 的下标）；nil = 用户点了取消
-    private func choosePreview(_ note: ParsedNote) async -> Set<Int>? {
+    /// 弹出预览页，等用户勾选、选清晰度。nil = 用户点了取消
+    private func choosePreview(_ note: ParsedNote) async -> PreviewChoice? {
         if Task.isCancelled { return nil }
         let request = PreviewRequest(platform: note.platform, title: note.title, author: note.author,
                                      items: note.items, referer: note.referer,
-                                     savedBefore: History.savedDate(note.historyKey))
+                                     savedBefore: History.savedDate(note.historyKey),
+                                     heights: note.heights,
+                                     links: { note.links(selection: $0, height: $1) })
         return await waiting {
-            await withCheckedContinuation { (c: CheckedContinuation<Set<Int>?, Never>) in
+            await withCheckedContinuation { (c: CheckedContinuation<PreviewChoice?, Never>) in
                 previewContinuation = c
                 previewRequest = request
             }
         }
     }
 
-    func decidePreview(_ selection: Set<Int>?) {
+    func decidePreview(_ choice: PreviewChoice?) {
         previewRequest = nil
-        previewContinuation?.resume(returning: selection)
+        previewContinuation?.resume(returning: choice)
         previewContinuation = nil
     }
 
@@ -196,19 +200,23 @@ final class SaveService: ObservableObject {
     // MARK: - 入口
 
     /// 返回一句结果摘要，例如「已保存 6 张实况照片」
-    func save(text: String) async throws -> String {
+    func save(text: String, mode: SaveMode = .organize) async throws -> String {
         guard !isRunning else { throw XHSError("上一个还在保存，请稍等") }
         isRunning = true
         phase = .parsing
         log = []
         details = []
+        links = []
         latest = ""
         useFallbackForAll = false
-        let task = Task { @MainActor in try await self.run(text: text) }
+        // 保存期间不自动锁屏；切到别的 App 时先向系统多要一点时间（真正的后台继续在开始下载时申请）
+        BackgroundRun.shared.begin()
+        let task = Task { @MainActor in try await self.run(text: text, mode: mode) }
         current = task
         defer {
             current = nil
             isRunning = false
+            BackgroundRun.shared.end(success: phase == .finished)
         }
         // 调用方（比如快捷指令）被取消时，也一起取消
         return try await withTaskCancellationHandler {
@@ -238,13 +246,13 @@ final class SaveService: ObservableObject {
         if Task.isCancelled { throw XHSError.cancelled }
     }
 
-    private func run(text: String) async throws -> String {
+    private func run(text: String, mode: SaveMode) async throws -> String {
         do {
             guard let url = NoteParser.extractURL(text) else { throw XHSError("没找到链接") }
             try await PhotoSaver.ensureAccess()
             let summary: String
             do {
-                summary = try await attempt(url)
+                summary = try await attempt(url, mode: mode)
             } catch {
                 try checkCancelled()
                 // 登录、cookie 相关的界面都在「设置 → 账号」里：这里只问要不要过去，不在下载页弹登录页
@@ -277,28 +285,36 @@ final class SaveService: ObservableObject {
         }
     }
 
-    private func attempt(_ url: URL) async throws -> String {
+    private func attempt(_ url: URL, mode: SaveMode) async throws -> String {
         let note = try await Extractors.pick(for: url).extract(url, service: self)
         defer { if let d = note.workDir { try? FileManager.default.removeItem(at: d) } }
         try checkCancelled()
-        return try await save(note)
+        return try await save(note, mode: mode)
     }
 
-    private func save(_ parsed: ParsedNote) async throws -> String {
+    private func save(_ parsed: ParsedNote, mode: SaveMode) async throws -> String {
         var note = parsed
         let title = note.title.isEmpty ? note.id : String(note.title.prefix(40))
         say("\(note.platform)：\(title)（\(note.items.count) 项）")
         if let a = note.author { say("作者：\(a.name)（\(a.primaryID)）") }
 
-        // 预览：下载之前先让用户看一眼、勾选要保存的项。selection 是选中的下标
+        links = note.links(selection: nil, height: 0)
+
+        // 「解析」：下载之前先预览，勾选要保存的项、选视频清晰度。selection 是选中的下标。
+        // 「快速保存」：不预览、不选相册，全部保存，视频取最高清晰度
         var selection: Set<Int>?
-        if Prefs.previewBeforeSave {
-            guard let chosen = await choosePreview(note) else {
+        var height = 0
+        if mode == .organize {
+            guard let choice = await choosePreview(note) else {
                 cancel()  // 在预览页点了取消 = 取消这次保存
                 throw XHSError.cancelled
             }
             try checkCancelled()
+            let chosen = choice.selection
             selection = chosen
+            height = choice.height
+            links = note.links(selection: chosen, height: height)
+            if height > 0 { say("视频清晰度：最高 " + String(height) + "p", detail: true) }
             if chosen.count < note.items.count { say("选了 \(chosen.count) / \(note.items.count) 项") }
             // 还没下载的作品（yt-dlp）把选择交给 fetch，只下载选中的；其它的直接筛掉没选的
             if note.fetch == nil {
@@ -321,15 +337,20 @@ final class SaveService: ObservableObject {
             target.creationDate = p
             say("照片日期设为发布时间：\(p.formatted(date: .abbreviated, time: .shortened))", detail: true)
         }
-        if Prefs.askAlbum {
+        if mode == .organize {
             target.album = try await chooseAlbum(for: note)
         }
         try checkCancelled()
 
+        // 从这里开始才是真正的下载：申请后台继续（iOS 26 起），切到别的 App 或锁屏也接着下
+        let name = note.title.isEmpty ? note.platform : String(note.title.prefix(30))
+        let background = BackgroundRun.shared.startLong(title: "正在保存", subtitle: name)
+        say(background ? "已申请后台继续下载" : "没有申请到后台继续下载：切到别的 App 后可能暂停", detail: true)
+
         // yt-dlp 的作品到这里才真正下载（查重、选相册都在下载之前）
         if let fetch = note.fetch {
             phase = .downloading
-            note.items = try await fetch(selection)
+            note.items = try await fetch(selection, height)
             note.fetch = nil
             try checkCancelled()
         }

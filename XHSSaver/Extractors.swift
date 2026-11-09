@@ -147,7 +147,7 @@ func galleryNote(_ url: URL, service: SaveService) async throws -> ParsedNote? {
         // 单个帖子不会有这么多项：多半是主页或合集，先问一句（查重和选相册之后才问）
         let all = items
         let more = r.more
-        note.fetch = { selection in
+        note.fetch = { selection, _ in
             // 预览页里已经看到数量并勾选过了，不用再问
             if let selection {
                 return all.enumerated().filter { selection.contains($0.offset) }.map { $0.element }
@@ -300,10 +300,10 @@ struct YtDlpExtractor: SiteExtractor {
 
     /// 下载 probe 解析好的内容并整理成媒体项（音视频分开的在这里合并）。
     /// mergeFailed = 有的项合并失败，多半是 iPhone 处理不了的编码
-    private static func collect(dir: URL, limit: Int?, only: [Int]?, service: SaveService,
+    private static func collect(dir: URL, limit: Int?, only: [Int]?, maxHeight: Int?, service: SaveService,
                                 onLog: @escaping @MainActor (String) -> Void) async throws
         -> (items: [NoteMedia], mergeFailed: Bool) {
-        let fetched = try await YtDlp.fetch(into: dir, limit: limit, only: only, onLog: onLog)
+        let fetched = try await YtDlp.fetch(into: dir, limit: limit, only: only, maxHeight: maxHeight, onLog: onLog)
         var items: [NoteMedia] = []
         var mergeFailed = false
         for f in fetched {
@@ -342,8 +342,8 @@ struct YtDlpExtractor: SiteExtractor {
         do {
             let onLog: @MainActor (String) -> Void = { SaveService.shared.say($0, detail: true) }
             let cookies = CookiePool.candidates(for: url)
-            let maxHeight = Prefs.maxVideoHeight
-            let r = try await YtDlp.probe(url: url, into: dir, cookies: cookies, maxHeight: maxHeight, onLog: onLog)
+            // 解析时按最高清晰度；预览页里可以改，fetch 的第二个参数就是选的清晰度
+            let r = try await YtDlp.probe(url: url, into: dir, cookies: cookies, maxHeight: 0, onLog: onLog)
             let count = max(1, r.entryCount)
             if count > 1 {
                 service.say("这个链接里有 \(count) 项\(r.more ? "（已到单次上限，后面可能还有）" : "")")
@@ -353,7 +353,7 @@ struct YtDlpExtractor: SiteExtractor {
             let coverMode = platform == "哔哩哔哩" && r.thumbnail != nil ? Prefs.biliCover : .off
             let cover = r.thumbnail.map { NoteMedia(kind: .image, original: [$0], fallback: []) }
             if coverMode == .only { service.say("按设置只保存封面，不下载视频") }
-            let fetch: @MainActor (Set<Int>?) async throws -> [NoteMedia] = { selection in
+            let fetch: @MainActor (Set<Int>?, Int) async throws -> [NoteMedia] = { selection, maxHeight in
                 // selection：用户在预览页选中的项。占位的顺序是「视频 0..<count，然后是封面」
                 if coverMode == .only, let cover { return [cover] }
                 var limit: Int?
@@ -375,8 +375,8 @@ struct YtDlpExtractor: SiteExtractor {
                 var items: [NoteMedia] = []
                 if only?.isEmpty != true {
                     service.say("开始下载…")
-                    var got = try await YtDlpExtractor.collect(dir: dir, limit: limit, only: only, service: service,
-                                                               onLog: onLog)
+                    var got = try await YtDlpExtractor.collect(dir: dir, limit: limit, only: only,
+                                                               maxHeight: maxHeight, service: service, onLog: onLog)
                     // 1080p 以上只有 HEVC 等编码，个别网站给的格式 iPhone 合并不了：先问，再改存 1080p（H.264）
                     if got.mergeFailed, maxHeight == 0 || maxHeight > 1080 {
                         if await service.ask("最高清晰度的版本处理不了",
@@ -386,7 +386,7 @@ struct YtDlpExtractor: SiteExtractor {
                             _ = try await YtDlp.probe(url: url, into: dir, cookies: cookies, maxHeight: 1080,
                                                       onLog: onLog)
                             got = try await YtDlpExtractor.collect(dir: dir, limit: limit, only: only,
-                                                                   service: service, onLog: onLog)
+                                                                   maxHeight: nil, service: service, onLog: onLog)
                         }
                     }
                     items = got.items
@@ -409,11 +409,16 @@ struct YtDlpExtractor: SiteExtractor {
                 : Author(name: r.uploader.isEmpty ? (ids.first ?? "") : r.uploader,
                          primaryID: ids.first ?? "", ids: ids,
                          idLabel: platform == "哔哩哔哩" ? "UID" : "用户 ID")
-            return ParsedNote(platform: platform, id: r.id, title: r.title, items: placeholders,
-                              author: author, published: r.published,
-                              // 只有 B 站封面要再联网下载，带上 B 站自己的来源页
-                              referer: platform == "哔哩哔哩" ? "https://www.bilibili.com/" : "",
-                              workDir: dir, fetch: fetch)
+            var note = ParsedNote(platform: platform, id: r.id, title: r.title, items: placeholders,
+                                  author: author, published: r.published,
+                                  // 只有 B 站封面要再联网下载，带上 B 站自己的来源页
+                                  referer: platform == "哔哩哔哩" ? "https://www.bilibili.com/" : "",
+                                  workDir: dir, fetch: fetch)
+            if coverMode != .only {
+                note.heights = r.heights
+                note.linksByHeight = r.links
+            }
+            return note
         } catch {
             try? FileManager.default.removeItem(at: dir)
             throw error

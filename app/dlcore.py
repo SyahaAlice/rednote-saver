@@ -208,6 +208,51 @@ def _download(raw, chosen, opts):
     return streams
 
 
+def _choose(chosen, opts):
+    """按 opts 里的清晰度重新选一次格式（不联网：用的是已经解析好的格式列表）"""
+    import yt_dlp
+    with yt_dlp.YoutubeDL(dict(opts, logger=_Log(None))) as ydl:
+        return ydl.process_ie_result(_strip(copy.deepcopy(chosen)), download=False)
+
+
+def _heights(items):
+    """这些视频一共有哪些清晰度可选（画面高度，从高到低）"""
+    found = set()
+    for _, chosen in items:
+        for f in chosen.get("formats") or []:
+            if f.get("height") and (f.get("vcodec") or "none") != "none":
+                found.add(int(f["height"]))
+    return sorted(found, reverse=True)
+
+
+def _links(chosen):
+    """选中的每条流的下载地址（音视频分开的有两条）"""
+    out = []
+    for f in chosen.get("requested_formats") or [chosen]:
+        u = f.get("url") or f.get("manifest_url")
+        if isinstance(u, str) and u.startswith("http"):
+            out.append(u)
+    return out
+
+
+# 「每种清晰度的下载地址」最多算这么多次（项数 × 清晰度档数），再多就只给最高清晰度的
+_LINK_BUDGET = 150
+
+
+def _links_by_height(items, heights, opts):
+    """{"0": [[第 1 项的地址…], [第 2 项的…]], "1080": […]}，"0" 是不限（最高清晰度）"""
+    out = {"0": [_links(chosen) for _, chosen in items]}
+    if len(heights) < 2 or len(items) * len(heights) > _LINK_BUDGET:
+        return out
+    for h in heights:
+        try:
+            o = dict(opts, format=_format(h))
+            out[str(h)] = [_links(_choose(chosen, o)) for _, chosen in items]
+        except Exception:
+            pass  # 算不出来就不给这一档的地址，不影响下载
+    return out
+
+
 def _account(ck):
     return "使用账号：" + (os.path.basename(ck) if ck else "无（游客）")
 
@@ -248,7 +293,9 @@ def probe(args_json):
           max_height（清晰度上限，0 = 不限）, max_entries（一个链接最多几项，0 = 不限）,
           format（直接指定 yt-dlp 的格式串，一般不用）
     返回：{"ok": true, "id", "title", "extractor", "uploader", ...,
-           "entries": 链接里的项数, "more": 是否可能还有超出 MAX_ENTRIES 的没算进来}"""
+           "entries": 链接里的项数, "more": 是否可能还有超出 MAX_ENTRIES 的没算进来,
+           "heights": 可选的清晰度（画面高度，从高到低）,
+           "links": {"0": 每一项在最高清晰度下的下载地址, "1080": …}}"""
     global _PENDING
     _PENDING = None
     a = json.loads(args_json)
@@ -269,8 +316,12 @@ def probe(args_json):
                 continue
             _PENDING = {"args": a, "cookies": cookies, "index": i, "items": items}
             limit = _limit(a)
+            heights = _heights(items)
             return json.dumps(dict(_meta(items, top), ok=True, entries=len(items),
-                                   more=bool(limit) and len(items) >= limit), ensure_ascii=False)
+                                   more=bool(limit) and len(items) >= limit,
+                                   heights=heights,
+                                   links=_links_by_height(items, heights, _opts(a, log, cancel, ck))),
+                              ensure_ascii=False)
         return _fail(str(last_err))
     except Exception as e:
         log.write(traceback.format_exc())
@@ -281,8 +332,9 @@ def probe(args_json):
 
 def fetch(args_json):
     """第二步：下载 probe 解析好的内容，链接里的每一项都下载。
-    参数：log, cancel, limit（只下载前几项；不传就是全部）, only（只下载这几项，从 1 数起；预览页勾选的）
-    返回：{"ok": true, "items": [{"streams": [{"path", "vcodec", "acodec", "ext"}]} 或 {"error": "..."}, ...]}
+    参数：log, cancel, limit（只下载前几项；不传就是全部）, only（只下载这几项，从 1 数起；预览页勾选的）,
+          max_height（预览页选的清晰度，0 = 不限；不传就用 probe 时的）
+    返回：{"ok": true, "items": [{"streams": [{"path", "vcodec", "acodec", "ext"}], "urls": 下载地址} 或 {"error": "..."}, ...]}
     每一项放在各自的子文件夹里。某一项失败不影响其它项，失败的那一项带 error。
     用解析成功的那个账号下载；一项都没成功就按顺序换后面的账号，重新解析再下载"""
     global _PENDING
@@ -295,6 +347,10 @@ def fetch(args_json):
     cancel = _Cancel(b.get("cancel") or a.get("cancel"))
     limit = b.get("limit")
     only = b.get("only")
+    # 预览页选的清晰度：传了就按它重新选格式（对这次的所有视频生效），0 = 不限
+    height = b.get("max_height")
+    if height is not None:
+        a = dict(a, max_height=int(height))
     try:
         cookies = p["cookies"]
         items = p["items"]
@@ -325,7 +381,10 @@ def fetch(args_json):
                 sub = os.path.join(a["out_dir"], f"{n:03d}")
                 os.makedirs(sub, exist_ok=True)
                 try:
-                    out.append({"streams": _download(raw, chosen, _opts(a, log, cancel, cookies[i], sub))})
+                    o = _opts(a, log, cancel, cookies[i], sub)
+                    if height is not None:
+                        chosen = _choose(chosen, o)
+                    out.append({"streams": _download(raw, chosen, o), "urls": _links(chosen)})
                 except Exception as e:
                     if cancel.hit():
                         return _cancelled()

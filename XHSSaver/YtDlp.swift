@@ -95,6 +95,10 @@ enum YtDlp {
         var more: Bool
         /// 封面图地址（yt-dlp 的 thumbnail）
         var thumbnail: URL?
+        /// 视频可选的清晰度（画面高度，从高到低）
+        var heights: [Int] = []
+        /// 每种清晰度下每一项的下载直链（0 = 最高清晰度）
+        var links: [Int: [[URL]]] = [:]
     }
     /// 下载好的一项：streams 是它的文件（音视频可能分开）；这一项失败时 streams 为空、error 有说明
     struct Fetched { var streams: [Stream]; var error: String? }
@@ -158,7 +162,7 @@ enum YtDlp {
             "cache_dir": cache,
             "cancel": cancelFlag(in: dir).path,
             "max_height": maxHeight,
-            "max_entries": Prefs.maxEntries,
+            "max_entries": 0,  // 不设上限：预览页里可以勾选要哪些
         ], dir: dir, log: log, onLog: onLog)
 
         var published = (o["timestamp"] as? Double).map { Date(timeIntervalSince1970: $0) }
@@ -168,22 +172,30 @@ enum YtDlp {
             f.timeZone = TimeZone(identifier: "Asia/Shanghai")
             published = f.date(from: d)
         }
+        var links: [Int: [[URL]]] = [:]
+        for (key, value) in o["links"] as? [String: Any] ?? [:] {
+            guard let h = Int(key), let rows = value as? [[String]] else { continue }
+            links[h] = rows.map { row in row.compactMap { URL(string: $0) } }
+        }
         return Info(id: o["id"] as? String ?? UUID().uuidString, title: o["title"] as? String ?? "",
                     extractor: o["extractor"] as? String ?? "", uploader: o["uploader"] as? String ?? "",
                     uploaderIDs: o["uploader_ids"] as? [String] ?? [], handle: o["handle"] as? String ?? "",
                     published: published, entryCount: o["entries"] as? Int ?? 1,
-                    more: o["more"] as? Bool ?? false, thumbnail: JSONTree.url(o["thumbnail"]))
+                    more: o["more"] as? Bool ?? false, thumbnail: JSONTree.url(o["thumbnail"]),
+                    heights: o["heights"] as? [Int] ?? [], links: links)
     }
 
     /// 第二步：下载 probe 解析好的内容（dir 要和 probe 时相同），链接里的每一项都下载；
-    /// limit 不为 nil 时只下载前几项；only 不为 nil 时只下载这几项（从 1 数起，预览页勾选的）。
+    /// limit 不为 nil 时只下载前几项；only 不为 nil 时只下载这几项（从 1 数起，预览页勾选的）；
+    /// maxHeight 不为 nil 时按这个清晰度重新选格式（0 = 最高）。
     /// 返回的数组和实际下载的项一一对应，失败的项带 error
-    static func fetch(into dir: URL, limit: Int? = nil, only: [Int]? = nil,
+    static func fetch(into dir: URL, limit: Int? = nil, only: [Int]? = nil, maxHeight: Int? = nil,
                       onLog: @escaping @MainActor (String) -> Void) async throws -> [Fetched] {
         let log = dir.appendingPathComponent("fetch-\(UUID().uuidString.prefix(8)).log")
         var args: [String: Any] = ["log": log.path, "cancel": cancelFlag(in: dir).path]
         if let limit { args["limit"] = limit }
         if let only { args["only"] = only }
+        if let maxHeight { args["max_height"] = maxHeight }
         let o = try await logged("fetch", args, dir: dir, log: log, onLog: onLog)
         let items = (o["items"] as? [[String: Any]] ?? []).map { item -> Fetched in
             let streams = (item["streams"] as? [[String: Any]] ?? []).compactMap { s -> Stream? in
@@ -239,7 +251,7 @@ enum YtDlp {
             "cache_dir": cache.path,
             "cancel": cancelFlag(in: dir).path,
             "gdl_zip": galleryZip.path,
-            "max_entries": Prefs.maxEntries,
+            "max_entries": 0,  // 不设上限
         ], dir: dir, log: log, onLog: onLog)
         if o["unsupported"] as? Bool == true { return nil }
 

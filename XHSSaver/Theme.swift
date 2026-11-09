@@ -42,6 +42,23 @@ struct PrimaryButtonStyle: ButtonStyle {
     }
 }
 
+/// 和主按钮并排的第二个按钮：同样大小，浅色底
+struct SecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(isEnabled ? Theme.violet : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 15)
+            .background(Theme.violet.opacity(isEnabled ? 0.12 : 0.05),
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.spring(duration: 0.25), value: configuration.isPressed)
+    }
+}
+
 /// 次要按钮：浅色胶囊
 struct ChipButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled

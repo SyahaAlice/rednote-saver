@@ -10,6 +10,7 @@
 - probe 只解析不下载；fetch 才下载；fetch 之后不能再 fetch
 - 一个链接里的多项全部下载，各放各的子文件夹；limit 只下前几项
 - 某一项失败不影响其它项
+- 清晰度：probe 列出可选清晰度和每一档的下载地址；fetch 可以换清晰度
 - 取消：下载前、下载途中都返回 cancelled
 - 解析失败时错误原样返回
 - gallery-dl（装了才测）：只列出不下载、不支持的网址交还给 yt-dlp、微博实况图配对、不过滤内容
@@ -164,6 +165,28 @@ r = fetch(d, only=[3])
 check("only=[3] 只下第 3 项（预览页勾选），放在它自己的子文件夹", r.get("ok") and len(r["items"]) == 1
       and os.path.basename(os.path.dirname(r["items"][0]["streams"][0]["path"])) == "003" and len(media_files(d)) == 1, r)
 shutil.rmtree(d)
+
+print("清晰度和下载地址")
+d = tempfile.mkdtemp()
+r = probe(d, "a.mp4")
+check("probe 给出可选清晰度和下载地址", isinstance(r.get("heights"), list)
+      and r.get("links", {}).get("0") == [[BASE + "a.mp4"]], r)
+r = fetch(d, max_height=720)
+check("fetch 带清晰度：照常下载，并给出实际用的下载地址", r.get("ok") and r["items"][0].get("urls") == [BASE + "a.mp4"], r)
+shutil.rmtree(d)
+multi = [({}, {"formats": split}), ({}, {"formats": merged})]
+check("可选清晰度：各项合在一起，从高到低", dlcore._heights(multi) == [2160, 1080, 720, 480], dlcore._heights(multi))
+info = {"id": "x", "title": "x", "extractor": "test", "extractor_key": "Test",
+        "webpage_url": "http://example.invalid/", "formats": [dict(f) for f in split]}
+base_opts = {"format": dlcore._format(0), "format_sort": dlcore.FORMAT_SORT, "quiet": True, "no_warnings": True}
+with yt_dlp.YoutubeDL(base_opts) as ydl:
+    top_choice = ydl.process_ie_result(info, download=False)
+again = dlcore._choose(top_choice, dict(base_opts, format=dlcore._format(1080)))
+check("换清晰度重新选格式（不联网）", [f["format_id"] for f in again["requested_formats"]] == ["avc1080", "m4a"])
+links = dlcore._links_by_height([({}, top_choice)], [2160, 1080, 720], base_opts)
+check("每种清晰度各自的下载地址", links.get("0") == [["http://example.invalid/hevc2160", "http://example.invalid/m4a"]]
+      and links.get("1080") == [["http://example.invalid/avc1080", "http://example.invalid/m4a"]]
+      and links.get("720") == [["http://example.invalid/avc720", "http://example.invalid/m4a"]], links)
 
 print("取消")
 d = tempfile.mkdtemp()

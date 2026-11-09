@@ -25,7 +25,8 @@
                                             ▼
                               ParsedNote（所有网站统一的结果）
                                             ▼
-        SaveService：预览（勾选要保存的项）─▶ 查重 ─▶ 选相册 ─▶（yt-dlp 的作品在这里才下载）
+        SaveService：「解析」= 预览（勾选、选清晰度）─▶ 选相册；「快速保存」= 跳过这两步、全部保存
+                     ─▶ 查重 ─▶（yt-dlp 的作品在这里才下载）
                      ─▶ 逐项下载 / 实况合成 ─▶ 存进相册 ─▶ 记下载记录
 ```
 
@@ -38,7 +39,8 @@
 | `Instagram.swift`、`XPost.swift`、`Weibo.swift` | 各自的「怎么认出要的那份数据」和「怎么解析」 |
 | `YtDlp.swift`、`app/dlcore.py`、`PythonBridge.m` | 内嵌 Python 上的 yt-dlp |
 | `SaveService.swift` | 整个保存流程、所有提问、取消 |
-| `PreviewView.swift` | 预览页：下载之前列出作品里的每一项，勾选后才下载 |
+| `PreviewView.swift` | 预览页：下载之前列出作品里的每一项，勾选、选视频清晰度；下载直链（`LinksSection`） |
+| `BackgroundRun.swift` | 保存期间不自动锁屏、切走后多要一点时间、iOS 26 起申请后台继续下载 |
 | `Downloader.swift` | 下载单个文件，按文件头决定扩展名 |
 | `LivePhotoMaker.swift`、`LiveTools.swift` | 实况照片配对、视频转实况、实况拆分、音视频合并 |
 | `PhotoSaver.swift` | PhotoKit 入库、相册匹配和命名 |
@@ -85,7 +87,7 @@ App 不做内容审查：不按内容类型、敏感标记、年龄分级筛选�
 
 - yt-dlp 不设 `age_limit`、`match_filter` 之类的选项。
 - gallery-dl 里默认会跳过内容的开关在 `dlcore._gdl_setup` 里全部打开（被标成不可用的媒体、转发、微博「电影」类视频），不设任何 `*-filter`、黑白名单。`tools/test_dlcore.py` 会检查这一点。
-- 数量和清晰度上的限制只有两个，都在设置里、都能改成不限：「一个链接最多保存」（默认 100 项）和「其它网站视频清晰度」（默认不限）。
+- 没有数量上限（传给 dlcore 的 `max_entries` 固定是 0）：一个链接里有多少项都列出来，由用户在预览页勾选。视频清晰度默认最高，在预览页里可以改。
 - 超过 20 项先问、原图失败先问，是确认，不是限制：用户点了就照做。
 
 新增功能时不要引入上面没列出的筛选或上限；确实需要的技术性限制要做成设置，并写进这一节。
