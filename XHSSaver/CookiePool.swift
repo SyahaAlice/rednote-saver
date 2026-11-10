@@ -75,6 +75,7 @@ enum CookiePool {
                 .domain: e.domain, .path: e.path.isEmpty ? "/" : e.path, .name: e.name, .value: e.value,
             ]
             if e.secure { p[.secure] = "TRUE" }
+            if e.httpOnly { p[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
             if let exp = e.expires { p[.expires] = exp }
             return HTTPCookie(properties: p)
         }

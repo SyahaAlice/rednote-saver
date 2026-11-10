@@ -177,9 +177,9 @@ struct DownloadView: View {
         .accessibilityIdentifier("cancel")
     }
 
-    /// 步骤右边那一小段字：进行中的显示进度（3 / 9、37%…），结束的显示用了多久
+    /// 步骤右边那一小段字：进行中的显示进度（3 / 9、37%…），结束的不显示（用时只记在「过程」里）
     private func note(for stage: SaveStage) -> String {
-        guard stage.running else { return SaveStage.duration(stage.total) }
+        guard stage.running else { return "" }
         switch service.phase {
         case .saving(let index, let total):
             let count = total > 1 ? "\(index) / \(total)" : ""

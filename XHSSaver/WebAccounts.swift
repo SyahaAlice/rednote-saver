@@ -18,6 +18,23 @@ struct WebAccount: Codable, Identifiable, Hashable {
     @MainActor var dataStore: WKWebsiteDataStore { WKWebsiteDataStore(forIdentifier: id) }
 }
 
+/// 「导出账号」得到的文件：所有账号的 cookie 打成一个 JSON，可以原样导入回来（换手机、重装之后用）
+struct CookieBundle: Codable {
+    static let formatName = "xhssaver-cookies"
+    var format = CookieBundle.formatName
+    var version = 1
+    var exported: Date
+    /// App 内登录的账号（名称、网站、对应哪个文件）
+    var accounts: [WebAccount]
+    /// 号池里的每个文件：Netscape 格式的原文
+    var files: [File]
+
+    struct File: Codable {
+        var name: String
+        var content: String
+    }
+}
+
 struct SitePreset: Identifiable {
     var id: String { site }
     var title: String
@@ -30,7 +47,9 @@ struct SitePreset: Identifiable {
 
     static let all: [SitePreset] = [
         SitePreset(title: "抖音", site: "douyin.com", loginURL: "https://www.douyin.com/", desktop: true),
-        SitePreset(title: "小红书", site: "xiaohongshu.com", loginURL: "https://www.xiaohongshu.com/explore"),
+        // 小红书：手机版网页只有「打开 App」，没有登录入口；桌面版会弹出登录框（手机号 + 验证码）
+        SitePreset(title: "小红书", site: "xiaohongshu.com", loginURL: "https://www.xiaohongshu.com/explore",
+                   desktop: true),
         SitePreset(title: "哔哩哔哩", site: "bilibili.com", loginURL: "https://passport.bilibili.com/login"),
         SitePreset(title: "微博", site: "weibo.com", loginURL: "https://weibo.com/login.php"),
         SitePreset(title: "Instagram", site: "instagram.com", loginURL: "https://www.instagram.com/accounts/login/"),
@@ -58,9 +77,72 @@ final class WebAccounts: ObservableObject {
 
     func load() {
         CookiePool.prepareFolder()
-        guard let data = try? Data(contentsOf: listFile),
-              let list = try? JSONDecoder().decode([WebAccount].self, from: data) else { return }
-        accounts = list
+        guard let data = try? Data(contentsOf: listFile) else { return }
+        // 保存时日期写成 ISO 8601 的文字，读的时候也要按这个格式；
+        // 以前这里用了默认格式，导出过 cookie（lastExport 有值）的账号列表重启后读不出来
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        if let list = try? dec.decode([WebAccount].self, from: data) {
+            accounts = list
+        } else if let list = try? JSONDecoder().decode([WebAccount].self, from: data) {
+            accounts = list
+        }
+    }
+
+    // MARK: - 导出 / 导入
+
+    /// 把所有账号打成一个文件（JSON）：号池里每个 cookies 文件的内容 + App 内登录的账号列表。
+    /// 这个文件等于登录凭证，只应该由用户自己保管
+    func exportBundle() async throws -> Data {
+        // 先把内置浏览器里最新的 cookie 刷进号池（只刷登录过的账号）
+        for a in accounts where a.lastExport != nil { await exportCookies(a) }
+        let files = CookiePool.allFiles().compactMap { f -> CookieBundle.File? in
+            guard let text = try? String(contentsOf: f, encoding: .utf8) else { return nil }
+            return CookieBundle.File(name: f.lastPathComponent, content: text)
+        }
+        guard !files.isEmpty else { throw XHSError("还没有可以导出的账号") }
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        enc.dateEncodingStrategy = .iso8601
+        return try enc.encode(CookieBundle(exported: Date(), accounts: accounts, files: files))
+    }
+
+    /// 导入：这个 App 导出的文件，或者一个普通的 Netscape cookies 文件。返回一句结果。
+    /// 同名的账号文件会被换成导入的；App 内登录的账号连内置浏览器里的登录状态一起恢复
+    func importCookies(from url: URL) async throws -> String {
+        let data = try Data(contentsOf: url)
+        let fm = FileManager.default
+        try fm.createDirectory(at: CookiePool.folder, withIntermediateDirectories: true)
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        if let bundle = try? dec.decode(CookieBundle.self, from: data), bundle.format == CookieBundle.formatName {
+            var written = 0
+            for f in bundle.files {
+                // 只取文件名本身，不让导入的文件写到号池文件夹外面
+                let name = (f.name as NSString).lastPathComponent
+                guard name.lowercased().hasSuffix(".txt"), name != "README.txt" else { continue }
+                try f.content.write(to: CookiePool.folder.appendingPathComponent(name), atomically: true, encoding: .utf8)
+                written += 1
+            }
+            var restored = 0
+            for a in bundle.accounts {
+                if let i = accounts.firstIndex(where: { $0.id == a.id }) { accounts[i] = a } else { accounts.append(a) }
+                guard fm.fileExists(atPath: a.cookieFile.path) else { continue }
+                let store = a.dataStore.httpCookieStore
+                for c in CookiePool.httpCookies(from: a.cookieFile) { await store.setCookie(c) }
+                restored += 1
+            }
+            save()
+            return "已导入 \(written) 个账号文件" + (restored > 0 ? "，恢复了 \(restored) 个内置浏览器账号的登录状态" : "")
+        }
+        // 普通的 Netscape cookies 文件：验证能读出 cookie 再放进号池
+        guard !CookiePool.entries(in: url).isEmpty else {
+            throw XHSError("不是这个 App 导出的文件，也不是 Netscape 格式的 cookies 文件")
+        }
+        var name = url.lastPathComponent
+        if !name.lowercased().hasSuffix(".txt") { name += ".txt" }
+        try data.write(to: CookiePool.folder.appendingPathComponent(name), options: .atomic)
+        return "已导入：\(name)"
     }
 
     private func save() {

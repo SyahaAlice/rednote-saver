@@ -1,4 +1,17 @@
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// 「导出账号」写出去的文件
+struct CookieBundleDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    var data: Data
+
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
 
 struct SettingsView: View {
     @ObservedObject private var web = WebAccounts.shared
@@ -12,6 +25,11 @@ struct SettingsView: View {
     @AppStorage(Prefs.biliCoverKey) private var biliCover = Prefs.BiliCover.withVideo.rawValue
     /// 账号一节的详细说明平时收起
     @State private var showAccountHelp = false
+    /// 导出 / 导入账号
+    @State private var exportDocument: CookieBundleDocument?
+    @State private var showExport = false
+    @State private var showImport = false
+    @State private var transferNote = ""
     @State private var historyCount = History.count
     @State private var confirmClearHistory = false
     /// 相册命名的两组设置平时很少改，默认收起
@@ -132,12 +150,34 @@ struct SettingsView: View {
                         .disabled(checking || !pool.contains { $0.sites.contains("xiaohongshu.com") })
                     }
                     .buttonStyle(.borderless)
+                    HStack {
+                        Button("导出全部账号") {
+                            Task {
+                                do {
+                                    exportDocument = CookieBundleDocument(data: try await web.exportBundle())
+                                    showExport = true
+                                } catch {
+                                    transferNote = "导出失败：" + error.localizedDescription
+                                }
+                                pool = CookiePool.summaries()
+                            }
+                        }
+                        .accessibilityIdentifier("accounts-export")
+                        Spacer()
+                        Button("从文件导入") { showImport = true }
+                            .accessibilityIdentifier("accounts-import")
+                    }
+                    .buttonStyle(.borderless)
+                    if !transferNote.isEmpty {
+                        Text(transferNote).font(.footnote).foregroundStyle(.secondary)
+                    }
                     DisclosureGroup(isExpanded: $showAccountHelp) {
                         Text("""
                         点「添加账号」在内置浏览器里登录；cookie 失效时点「重新登录」。
                         也可以从电脑导入 Netscape 格式的 cookies 文件：
                         opendevice afc push --app \(bundleID) 本地文件 /Documents/cookies/
                         或者放进「文件 → 我的 iPhone → 多功能媒体下载器 → cookies」，再点「重新读取」。
+                        「导出全部账号」把所有账号的 cookie 存成一个文件，重装或换手机后用「从文件导入」放回来，内置浏览器里的登录状态也一起恢复；同名的账号会被换成文件里的。导出的文件等于登录凭证，不要发给别人。
                         不用的账号左滑删除。这里只显示名称和网站，不显示 cookie 内容。
                         """)
                         .font(.footnote)
@@ -215,6 +255,29 @@ struct SettingsView: View {
                 AddAccountView { account in
                     showAdd = false
                     loginAccount = account
+                }
+            }
+            .fileExporter(isPresented: $showExport, document: exportDocument, contentType: .json,
+                          defaultFilename: "下载器账号_" + DateFormatter.fileStamp.string(from: Date())) { result in
+                switch result {
+                case .success: transferNote = "已导出。这个文件等于登录凭证，请自己保管。"
+                case .failure(let error): transferNote = "导出失败：" + error.localizedDescription
+                }
+                exportDocument = nil
+            }
+            .fileImporter(isPresented: $showImport, allowedContentTypes: [.json, .plainText, .text]) { result in
+                guard case .success(let url) = result else { return }
+                Task {
+                    // 「文件」App 里选的文件要先申请访问
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    do {
+                        transferNote = try await web.importCookies(from: url)
+                    } catch {
+                        transferNote = "导入失败：" + error.localizedDescription
+                    }
+                    pool = CookiePool.summaries()
+                    onlineResults = [:]
                 }
             }
             .onAppear { openRequestedLogin() }
