@@ -4,6 +4,7 @@ import WebKit
 /// 抖音：未登录时作品数据接口直接拒绝（403），分享页里也不再带数据。
 /// 做法：用「设置 → 账号」里登录过的抖音账号，在 App 内置浏览器（桌面版网页）里打开作品页，
 /// 由抖音自己的网页脚本请求作品详情，App 只是把网页收到的那份数据复制一份来解析。
+/// 登录后抖音常常把作品数据直接写在页面里、不再请求接口，所以同时也读页面里自带的那份（见 scanJS）。
 /// 不伪造签名、不伪装浏览器；如果抖音要求验证，由用户在弹出的页面里自己完成。
 enum Douyin {
     struct Ref { var id: String; var kind: String }  // kind: video / note
@@ -70,6 +71,49 @@ enum Douyin {
         let plain = ((video["play_addr"] as? [String: Any])?["url_list"] as? [String] ?? []).compactMap(URL.init)
         if !plain.isEmpty { tiers.append(plain) }
         return tiers
+    }
+
+    /// 网页里直接带的作品数据（登录后抖音把它写在页面里，不再请求接口）字段名是驼峰写法，
+    /// 这里换成和接口一样的写法，后面统一交给 parse(detail:)
+    static func detail(fromPage p: [String: Any]) -> [String: Any] {
+        func str(_ v: Any?) -> String {
+            if let s = v as? String { return s }
+            if let n = v as? NSNumber { return n.stringValue }
+            return ""
+        }
+        /// 地址列表：元素可能是 {src: …} 也可能直接是字符串；「//」开头的补上 https
+        func urls(_ v: Any?) -> [String] {
+            (v as? [Any] ?? []).compactMap { e -> String? in
+                let s = (e as? String) ?? ((e as? [String: Any])?["src"] as? String) ?? ""
+                if s.isEmpty { return nil }
+                return s.hasPrefix("//") ? "https:" + s : s
+            }
+        }
+        func video(_ v: [String: Any]) -> [String: Any] {
+            let rates: [[String: Any]] = (v["bitRateList"] as? [[String: Any]] ?? []).map { b in
+                ["format": str(b["format"]).isEmpty ? str(b["videoFormat"]) : str(b["format"]),
+                 "bit_rate": b["bitRate"] as? Int ?? 0,
+                 "play_addr": ["url_list": urls(b["playAddr"]),
+                               "width": b["width"] as? Int ?? 0, "height": b["height"] as? Int ?? 0] as [String: Any]]
+            }
+            var covers = urls(v["coverUrlList"])
+            if covers.isEmpty, let c = v["cover"] as? String, !c.isEmpty { covers = [c] }
+            return ["bit_rate": rates, "play_addr": ["url_list": urls(v["playAddr"])], "cover": ["url_list": covers]]
+        }
+        var d: [String: Any] = ["aweme_id": str(p["awemeId"]), "desc": str(p["desc"]), "item_title": str(p["itemTitle"])]
+        if let t = p["createTime"] as? Double, t > 0 { d["create_time"] = t }
+        if let a = p["authorInfo"] as? [String: Any] {
+            d["author"] = ["nickname": str(a["nickname"]), "uid": str(a["uid"]), "sec_uid": str(a["secUid"]),
+                           "unique_id": str(a["uniqueId"]), "short_id": str(a["shortId"])]
+        }
+        let images: [[String: Any]] = (p["images"] as? [[String: Any]] ?? []).map { im in
+            var out: [String: Any] = ["url_list": urls(im["urlList"] ?? im["url_list"])]
+            if let v = im["video"] as? [String: Any] { out["video"] = video(v) }
+            return out
+        }
+        if !images.isEmpty { d["images"] = images }
+        if let v = p["video"] as? [String: Any] { d["video"] = video(v) }
+        return d
     }
 
     static func parse(detail d: [String: Any]) throws -> ParsedNote {
@@ -191,9 +235,80 @@ final class DouyinCapture: ObservableObject, Identifiable {
     }
 
     var pageURL: URL { URL(string: "https://www.douyin.com/\(target.kind)/\(target.id)")! }
+    private var modalURL: URL { URL(string: "https://www.douyin.com/jingxuan?modal_id=\(target.id)")! }
+    /// 已经看过几次网页里的数据（「重新加载」时清零）
+    private var polls = 0
+
+    /// 在网页自带的数据里找这个作品（登录后抖音把作品数据直接写在页面的 <script> 里，不再请求接口）。
+    /// 找到就返回它的 JSON 文字，没找到返回空字符串。只读页面内容，不发请求
+    private var scanJS: String {
+        """
+        (function (id) {
+          function find(o, depth) {
+            if (!o || typeof o !== 'object' || depth > 14) return null;
+            if (!Array.isArray(o) && String(o.awemeId) === id && (o.video || (o.images && o.images.length))) return o;
+            for (var k in o) { var v = o[k]; if (v && typeof v === 'object') { var r = find(v, depth + 1); if (r) return r; } }
+            return null;
+          }
+          var ss = document.scripts;
+          for (var i = 0; i < ss.length; i++) {
+            var t = ss[i].textContent || '';
+            if (t.indexOf(id) < 0) continue;
+            var cands = [t];
+            try { cands.push(decodeURIComponent(t)); } catch (e) {}
+            for (var j = 0; j < cands.length; j++) {
+              try { var r = find(JSON.parse(cands[j]), 0); if (r) return JSON.stringify(r); } catch (e) {}
+            }
+          }
+          return '';
+        })("\(target.id)")
+        """
+    }
+
+    private func readPage() async -> String {
+        await withCheckedContinuation { (c: CheckedContinuation<String, Never>) in
+            webView.evaluateJavaScript(scanJS, in: nil, in: .page) { result in
+                if case .success(let v) = result, let s = v as? String {
+                    c.resume(returning: s)
+                } else {
+                    c.resume(returning: "")
+                }
+            }
+        }
+    }
+
+    /// 接口那边没等到数据时，每隔一会儿看一眼网页里有没有
+    private func pollPage() async {
+        var started = false
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            // 读取结束（拿到数据或取消）后停下；刚开始那一下 continuation 可能还没设好
+            if continuation == nil {
+                if started { return }
+                continue
+            }
+            started = true
+            polls += 1
+            // 作品页等了一阵还没有：换成「精选页 + 作品浮层」的网址再读一次，那个页面的数据格式更规整
+            if polls == 7 {
+                hint = "换一种方式读取…"
+                webView.load(URLRequest(url: modalURL))
+                continue
+            }
+            let text = await readPage()
+            guard !text.isEmpty,
+                  let page = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { continue }
+            let detail = Douyin.detail(fromPage: page)
+            if (detail["aweme_id"] as? String) == target.id {
+                finish(.success(detail))
+                return
+            }
+        }
+    }
 
     func run() async throws -> [String: Any] {
         webView.load(URLRequest(url: pageURL))
+        Task { [weak self] in await self?.pollPage() }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 20_000_000_000)
             guard let self, self.continuation != nil else { return }
@@ -212,6 +327,7 @@ final class DouyinCapture: ObservableObject, Identifiable {
 
     func reload() {
         hint = "正在用抖音网页读取作品…"
+        polls = 0
         webView.load(URLRequest(url: pageURL))
     }
 
