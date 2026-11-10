@@ -25,6 +25,7 @@ struct SettingsView: View {
     @AppStorage(Prefs.biliCoverKey) private var biliCover = Prefs.BiliCover.withVideo.rawValue
     /// 账号一节的详细说明平时收起
     @State private var showAccountHelp = false
+    @AppStorage(WebAccounts.autoRenewKey) private var autoRenew = true
     /// 导出 / 导入账号
     @State private var exportDocument: CookieBundleDocument?
     @State private var showExport = false
@@ -132,6 +133,7 @@ struct SettingsView: View {
                         accountRow(row)
                     }
                     Button("添加账号") { showAdd = true }
+                    Toggle("自动续期登录", isOn: $autoRenew)
                     HStack {
                         Button("重新读取") {
                             pool = CookiePool.summaries()
@@ -174,6 +176,8 @@ struct SettingsView: View {
                     DisclosureGroup(isExpanded: $showAccountHelp) {
                         Text("""
                         点「添加账号」在内置浏览器里登录；cookie 失效时点「重新登录」。
+                        「自动续期登录」：打开 App 时，每个账号每天最多一次在内置浏览器里打开网站首页，让网站自己延长登录，再把最新的 cookie 同步到号池；发现掉线会在下载页提示。到期就必须重登的网站续不上。
+                        「同步到号池」只是把内置浏览器里现有的 cookie 抄一份过去，不访问网站。
                         也可以从电脑导入 Netscape 格式的 cookies 文件：
                         opendevice afc push --app \(bundleID) 本地文件 /Documents/cookies/
                         或者放进「文件 → 我的 iPhone → 多功能媒体下载器 → cookies」，再点「重新读取」。
@@ -335,7 +339,7 @@ struct SettingsView: View {
                 HStack {
                     Button(a.lastExport == nil ? "登录" : "重新登录") { loginAccount = a }
                     Spacer()
-                    Button("刷新 cookie") {
+                    Button("同步到号池") {
                         Task {
                             await web.exportCookies(a)
                             pool = CookiePool.summaries()

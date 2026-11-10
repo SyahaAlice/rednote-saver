@@ -10,6 +10,8 @@ struct WebAccount: Codable, Identifiable, Hashable {
     var site: String       // 例如 douyin.com、xiaohongshu.com
     var loginURL: String
     var lastExport: Date?
+    /// 上次自动续期（用这个账号打开一次网站）是什么时候
+    var lastVisit: Date?
 
     /// 号池里的文件名
     var cookieFileName: String { "web_\(site)_\(id.uuidString.prefix(8)).txt" }
@@ -70,6 +72,15 @@ final class WebAccounts: ObservableObject {
     static let shared = WebAccounts()
 
     @Published private(set) var accounts: [WebAccount] = []
+    /// 自动续期时发现已经掉线的账号（下载页顶上提示；用户看过或去登录后清空）
+    @Published var offline: [WebAccount] = []
+    private var renewing = false
+
+    /// 设置里的开关：自动续期登录（默认开）
+    static let autoRenewKey = "autoRenewLogins"
+    static var autoRenew: Bool { UserDefaults.standard.object(forKey: autoRenewKey) as? Bool ?? true }
+    /// 每个账号多久续一次
+    private static let renewEvery: TimeInterval = 24 * 3600
 
     private var listFile: URL { CookiePool.folder.appendingPathComponent("accounts.json") }
 
@@ -87,6 +98,53 @@ final class WebAccounts: ObservableObject {
         } else if let list = try? JSONDecoder().decode([WebAccount].self, from: data) {
             accounts = list
         }
+    }
+
+    // MARK: - 自动续期
+
+    /// 给登录过的账号续期：每个账号每天最多一次，在内置浏览器里打开一次网站首页（和自己打开网页看一眼一样），
+    /// 让网站自己决定要不要延长登录，再把最新的 cookie 同步到号池。
+    /// 续完检查登录还在不在，掉线的记进 offline。固定期限的网站、已经被踢下线的登录续不上，只能重新登录
+    func renewDue() async {
+        guard Self.autoRenew, !renewing else { return }
+        renewing = true
+        defer { renewing = false }
+        var lost: [WebAccount] = []
+        for a in accounts where a.lastExport != nil {
+            if let t = a.lastVisit, Date().timeIntervalSince(t) < Self.renewEvery { continue }
+            // 正在保存时不打扰（保存时也可能在用这个账号的浏览器）；下次再续
+            if SaveService.shared.isRunning { break }
+            await visit(a)
+            await exportCookies(a)
+            if let i = accounts.firstIndex(where: { $0.id == a.id }) {
+                accounts[i].lastVisit = Date()
+                save()
+            }
+            var gone = CookiePool.health(of: a.cookieFile, site: a.site).needsLogin
+            // 小红书被踢下线时 cookie 还在，要实际问一下网站认不认
+            if !gone, a.site == "xiaohongshu.com", await CookiePool.verifyOnline(a.cookieFile) == false { gone = true }
+            if gone { lost.append(a) }
+        }
+        if !lost.isEmpty { offline = lost }
+    }
+
+    /// 用这个账号在内置浏览器里打开一次网站首页，等它加载完
+    private func visit(_ a: WebAccount) async {
+        let preset = SitePreset.preset(for: a.site)
+        var home = URL(string: "https://www.\(a.site)/")
+        if preset == nil, let login = URL(string: a.loginURL), let host = login.host {
+            home = URL(string: "https://\(host)/")
+        }
+        guard let home else { return }
+        let web = makeWebView(for: a, desktop: preset?.desktop ?? false)
+        web.load(URLRequest(url: home, timeoutInterval: 20))
+        for _ in 0..<40 {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if !web.isLoading { break }
+        }
+        // 页面自己的脚本（有的网站靠它换新的登录凭证）再给几秒
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        web.stopLoading()
     }
 
     // MARK: - 导出 / 导入

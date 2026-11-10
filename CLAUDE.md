@@ -56,6 +56,7 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 | `login-status`、`login-reload` | 设置里登录页底部的提示和「重新加载」。`login-status` 的「值」：`logged-in`（浏览器里已有登录 cookie，可以点「完成」）、`not-logged-in`、`unknown` |
 | `preview-save`、`preview-cancel`、`preview-quality` | 预览页的「保存到相册（N 项）」「取消」和视频清晰度选择（只有多种清晰度可选时出现） |
 | `stages` | 步骤列表：走过的每一步，进行中的右边是进度（`3 / 9`、百分比） |
+| `offline-accounts` | 下载页顶上「账号已掉线」卡片里的账号名单（自动续期发现掉线时才出现） |
 | `accounts-export`、`accounts-import` | 设置页「导出全部账号」「从文件导入」（会弹出系统的文件选择） |
 | `latest` | 保存过程中「正在做什么」的那一行 |
 | `details` | 「过程」，点开是全部日志 |

@@ -3,6 +3,7 @@ import SwiftUI
 /// 根界面：下载 / 实况工具 / 设置。替代版本的确认弹窗挂在最外层，任何页面都能弹出
 struct ContentView: View {
     @ObservedObject private var service = SaveService.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView(selection: $service.selectedTab) {
@@ -40,11 +41,17 @@ struct ContentView: View {
             PreviewView(request: req)
         }
         .onAppear { CookiePool.prepareFolder() }
+        // 打开 App、从后台回来时，给到时间的账号续一次登录（每个账号每天最多一次）
+        .task { await WebAccounts.shared.renewDue() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { Task { await WebAccounts.shared.renewDue() } }
+        }
     }
 }
 
 struct DownloadView: View {
     @ObservedObject private var service = SaveService.shared
+    @ObservedObject private var web = WebAccounts.shared
     @State private var text = ""
     @State private var showDetails = false
     @FocusState private var editing: Bool
@@ -56,6 +63,7 @@ struct DownloadView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     header
+                    if !web.offline.isEmpty { offlineCard }
                     inputCard
                     actionButtons
                     if service.isRunning { cancelButton }
@@ -91,6 +99,28 @@ struct DownloadView: View {
             Spacer(minLength: 0)
         }
         .padding(.top, 12)
+    }
+
+    // 自动续期时发现掉线的账号：提示一下，可以直接去设置重新登录
+    private var offlineCard: some View {
+        Card {
+            Label("账号已掉线", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+                .foregroundStyle(.orange)
+            Text(web.offline.map { "\($0.name)（\($0.site)）" }.joined(separator: "、"))
+                .font(.callout)
+                .accessibilityIdentifier("offline-accounts")
+            HStack(spacing: 10) {
+                Spacer()
+                Button("知道了") { web.offline = [] }
+                    .buttonStyle(ChipButtonStyle())
+                Button("去重新登录") {
+                    web.offline = []
+                    service.selectedTab = SaveService.settingsTab
+                }
+                .buttonStyle(ChipButtonStyle())
+            }
+        }
     }
 
     // 输入框 + 粘贴 / 清空（两个按钮挨在一起，靠右，右手拇指好按）
