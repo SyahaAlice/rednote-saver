@@ -321,6 +321,20 @@ if HAVE_GDL:
 else:
     print("gallery-dl 没有安装，跳过它的测试")
 
+# B 站的兼容处理：只给 bilivideo.com 的地址补 Range 头，原有的请求头不能丢，别的地址不动
+info = dlcore._compat({
+    "http_headers": {"Referer": "https://www.bilibili.com/video/BV1"},
+    "formats": [{"url": "https://upos-sz-mirrorcosov.bilivideo.com/a.m4s"},
+                {"url": "https://upos-hz-mirrorakam.akamaized.net/a.m4s"},
+                {"url": "https://xy1.bilivideo.com/b.m4s", "http_headers": {"X": "1"}},
+                {"manifest_url": "https://example.com/x.m3u8"}],
+})
+f0, f1, f2, f3 = info["formats"]
+check("B 站 bilivideo.com 的地址补上 Range 头，并带着原来的 Referer",
+      f0.get("http_headers") == {"Referer": "https://www.bilibili.com/video/BV1", "Range": "bytes=0-"}
+      and f2["http_headers"] == {"Referer": "https://www.bilibili.com/video/BV1", "X": "1", "Range": "bytes=0-"}, info)
+check("其它地址不加请求头", "http_headers" not in f1 and "http_headers" not in f3, info)
+
 srv.shutdown()
 shutil.rmtree(site)
 print()

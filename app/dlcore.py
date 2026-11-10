@@ -218,6 +218,21 @@ def _extract(url, opts):
         return [(top, ydl.process_ie_result(copy.deepcopy(top), download=False))], None
 
 
+def _compat(info):
+    """个别网站的下载地址要多带一个请求头才给下（yt-dlp 还没修的已知问题，修了以后可以删）。
+    B 站：*.bilivideo.com 的地址前面有一层防火墙，请求里没有 Range 头就回 HTTP 567
+    （yt-dlp issue #17847）。给这些地址补上「从头开始」的 Range 头，原有的请求头（Referer）要一起带上：
+    格式自己有 http_headers 时 yt-dlp 就不再用作品那一层的了"""
+    from urllib.parse import urlsplit
+    base = info.get("http_headers") or {}
+    for f in info.get("formats") or []:
+        u = f.get("url")
+        host = (urlsplit(u).hostname or "") if isinstance(u, str) else ""
+        if host.endswith(".bilivideo.com"):
+            f["http_headers"] = {**base, **(f.get("http_headers") or {}), "Range": "bytes=0-"}
+    return info
+
+
 def _download(raw, chosen, opts):
     """把选好的每条流分别下载下来（音视频分开的由 Swift 端合并）"""
     import yt_dlp
@@ -226,7 +241,7 @@ def _download(raw, chosen, opts):
     for f in parts:
         one = dict(opts, format=f["format_id"])
         with yt_dlp.YoutubeDL(one) as ydl:
-            res = ydl.process_ie_result(_strip(copy.deepcopy(raw)), download=True)
+            res = ydl.process_ie_result(_compat(_strip(copy.deepcopy(raw))), download=True)
             dl = (res.get("requested_downloads") or [{}])[0]
             path = dl.get("filepath") or ydl.prepare_filename(res)
         streams.append({
