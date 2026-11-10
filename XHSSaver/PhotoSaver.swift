@@ -73,7 +73,8 @@ enum PhotoSaver {
     }
 }
 
-/// 相册：按作者匹配已有相册，或按规则新建「作者名字（平台名_作者ID）」
+/// 相册：三件分开的事——命名（按模板从账号生成名字）、匹配（已有相册和这次的作者对不对得上，分档）、
+/// 存入（放进哪个，由 SaveService 和选相册页决定）。这里只管前两件
 enum Albums {
     /// 相册命名格式（多个账号时自动按多账号格式拼接）
     enum Style: String, CaseIterable, Identifiable {
@@ -172,13 +173,33 @@ enum Albums {
         return nil
     }
 
-    /// 已有相册 + 这次的账号合并后的新名字；没有新增信息或旧名字读不出来时返回 nil
+    /// 相册名里有没有按规则写的这个账号：完整的「前缀 + ID」，后面不能紧跟着别的字母数字
+    /// （xhs_12345 不算匹配 xhs_123456）。太短的 ID 不算，容易误中
+    static func mentions(_ title: String, _ e: Entry) -> Bool {
+        let id = e.cleanID
+        guard id.count >= 4, !e.prefix.isEmpty else { return false }
+        var from = title.startIndex
+        while let r = title.range(of: e.prefix + id, range: from..<title.endIndex) {
+            if r.upperBound == title.endIndex { return true }
+            let next = title[r.upperBound]
+            if !(next.isLetter || next.isNumber || next == "_") { return true }
+            from = r.upperBound
+        }
+        return false
+    }
+
+    /// 已有相册 + 这次的账号合并后的新名字；没有新增信息时返回 nil。
+    /// 旧名字是按规则写的：把账号并进去重新生成。是手写的名字：原名保留，后面按规则接上这次的账号
     static func mergedName(existing title: String, adding entries: [Entry]) -> String? {
-        guard let old = parse(title) else { return nil }
-        let merged = resolve(old.entries + entries)
-        guard merged.count > resolve(old.entries).count else { return nil }
-        let name = compose(old.style, merged)
-        return name == title ? nil : name
+        if let old = parse(title) {
+            let merged = resolve(old.entries + entries)
+            guard merged.count > resolve(old.entries).count else { return nil }
+            let name = compose(old.style, merged)
+            return name == title ? nil : name
+        }
+        let add = resolve(entries).filter { !$0.cleanID.isEmpty && !mentions(title, $0) }
+        guard !add.isEmpty else { return nil }
+        return title + Prefs.multiSeparator + compose(.normal, add)
     }
 
     static func rename(_ album: PHAssetCollection, to title: String) async throws {
@@ -187,34 +208,76 @@ enum Albums {
         }
     }
 
+    /// 一个已有相册和这次的作者对得上到什么程度
     struct Match {
-        var album: PHAssetCollection
-        var title: String
-        /// true = 相册名里有作者 ID（可靠）；false = 只匹配到昵称（昵称可能重名）
-        var byID: Bool
-    }
+        enum Level: Int {
+            /// 相册名里有按规则写的这个账号（前缀 + ID）：确定就是它，快速保存会直接放入
+            case exact
+            /// 相册名里出现了这个 ID，但不是按规则写的：多半是，让用户自己定
+            case id
+            /// 只对上了用户名：昵称可能重名
+            case name
+            /// 用户自己搜出来的
+            case manual
 
-    static func matches(for author: Author) -> [Match] {
-        matches(ids: author.ids + [author.primaryID], names: [author.name])
-    }
-
-    /// 在用户自己建的相册里找：名字包含任意一个账号的 ID 算匹配；只对上用户名的单独列出（可能重名）
-    static func matches(ids rawIDs: [String], names rawNames: [String]) -> [Match] {
-        let all = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil)
-        // 太短的 ID 容易误匹配；@ 开头的去掉 @ 再找（相册里可能写成 x_@id）
-        let ids = Set(rawIDs.map { $0.trimmingCharacters(in: .whitespaces) }
-            .map { $0.hasPrefix("@") ? String($0.dropFirst()) : $0 }.filter { $0.count >= 4 })
-        let names = Set(rawNames.map { $0.trimmingCharacters(in: .whitespaces) }.filter { $0.count >= 2 })
-        var byID: [Match] = [], byName: [Match] = []
-        all.enumerateObjects { c, _, _ in
-            let t = c.localizedTitle ?? ""
-            if ids.contains(where: { t.contains($0) }) {
-                byID.append(Match(album: c, title: t, byID: true))
-            } else if names.contains(where: { t.contains($0) }) {
-                byName.append(Match(album: c, title: t, byID: false))
+            var label: String {
+                switch self {
+                case .exact: return "完全匹配"
+                case .id: return "含有这个 ID"
+                case .name: return "仅用户名相同"
+                case .manual: return "搜索到的"
+                }
             }
         }
-        return byID + byName
+
+        var album: PHAssetCollection
+        var title: String
+        var level: Level
+    }
+
+    /// 这个作者的所有 ID 各算一个账号（相册名里用的可能是其中任何一个）
+    static func entries(platform: String, author: Author) -> [Entry] {
+        var ids: [String] = []
+        for id in [author.primaryID] + author.ids where !id.isEmpty && !ids.contains(id) { ids.append(id) }
+        if ids.isEmpty { return [Entry(platform: platform, name: author.name, id: "")] }
+        return ids.map { Entry(platform: platform, name: author.name, id: $0) }
+    }
+
+    static func matches(platform: String, author: Author) -> [Match] {
+        matches(entries: entries(platform: platform, author: author))
+    }
+
+    /// 在用户自己建的相册里找这些账号，按可靠程度排：完全匹配、含有 ID、仅用户名
+    static func matches(entries: [Entry]) -> [Match] {
+        let all = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil)
+        // 太短的 ID 容易误匹配
+        let ids = Set(entries.map(\.cleanID).filter { $0.count >= 4 })
+        let names = Set(entries.map { $0.name.trimmingCharacters(in: .whitespaces) }.filter { $0.count >= 2 })
+        var found: [Match] = []
+        all.enumerateObjects { c, _, _ in
+            let t = c.localizedTitle ?? ""
+            if entries.contains(where: { mentions(t, $0) }) {
+                found.append(Match(album: c, title: t, level: .exact))
+            } else if ids.contains(where: { t.contains($0) }) {
+                found.append(Match(album: c, title: t, level: .id))
+            } else if names.contains(where: { t.contains($0) }) {
+                found.append(Match(album: c, title: t, level: .name))
+            }
+        }
+        return found.sorted { $0.level.rawValue < $1.level.rawValue }
+    }
+
+    /// 用户自己输入文字搜相册名（不分大小写）
+    static func search(_ text: String) -> [Match] {
+        let q = text.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        let all = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil)
+        var found: [Match] = []
+        all.enumerateObjects { c, _, _ in
+            let t = c.localizedTitle ?? ""
+            if t.localizedCaseInsensitiveContains(q) { found.append(Match(album: c, title: t, level: .manual)) }
+        }
+        return found
     }
 
     static func create(_ title: String) async throws -> PHAssetCollection {

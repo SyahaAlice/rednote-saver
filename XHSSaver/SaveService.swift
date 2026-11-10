@@ -486,6 +486,8 @@ final class SaveService: ObservableObject {
         }
         if mode == .organize {
             target.album = try await chooseAlbum(for: note)
+        } else if mode == .quick {
+            target.album = quickAlbum(for: note)
         }
         try checkCancelled()
 
@@ -510,6 +512,23 @@ final class SaveService: ObservableObject {
 
     // MARK: - 相册归类
 
+    /// 快速保存：恰好有一个完全匹配的相册（名字里有按规则写的这个账号）就直接放进去，
+    /// 没有或者不止一个就不放相册。不问、不新建、不改名、不弹权限申请
+    private func quickAlbum(for note: ParsedNote) -> PHAssetCollection? {
+        guard let author = note.author, !(author.primaryID.isEmpty && author.ids.isEmpty) else { return nil }
+        guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else {
+            say("没有「完整照片访问」权限，读不到已有相册，不放相册", detail: true)
+            return nil
+        }
+        let exact = Albums.matches(platform: note.platform, author: author).filter { $0.level == .exact }
+        guard exact.count == 1 else {
+            say(exact.isEmpty ? "没有完全匹配的相册，不放相册" : "有 \(exact.count) 个相册都完全匹配，不自动放入", detail: true)
+            return nil
+        }
+        say("放入相册：\(exact[0].title)")
+        return exact[0].album
+    }
+
     private func chooseAlbum(for note: ParsedNote) async throws -> PHAssetCollection? {
         guard let author = note.author, !author.name.isEmpty || !author.ids.isEmpty else {
             say("拿不到作者信息，不做相册归类")
@@ -522,7 +541,7 @@ final class SaveService: ObservableObject {
         try checkCancelled()
         let request = AlbumRequest(platform: note.platform, author: author,
                                    suggestedName: Albums.ruleName(platform: note.platform, author: author),
-                                   matches: Albums.matches(for: author))
+                                   matches: Albums.matches(platform: note.platform, author: author))
         let decision = await waiting {
             await withCheckedContinuation { (c: CheckedContinuation<AlbumDecision, Never>) in
                 albumContinuation = c
