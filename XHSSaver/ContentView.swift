@@ -403,6 +403,8 @@ struct AlbumChoiceView: View {
     @State private var choice = Choice.create
     /// 正在问「要不要把账号并进相册名」
     @State private var merging: Albums.Match?
+    /// 合并后的相册名：先按规则生成一个，用户可以随便改
+    @State private var mergedText = ""
     @State private var working = false
     @State private var editAuthor = false
 
@@ -492,7 +494,8 @@ struct AlbumChoiceView: View {
         case .existing:
             guard let m = chosen else { return }
             // 相册名里还没有这次的账号：问要不要并进去；已经有了就直接放入
-            if Albums.mergedName(existing: m.title, adding: resolved) != nil {
+            if let suggestion = Albums.mergedName(existing: m.title, adding: resolved) {
+                mergedText = suggestion
                 merging = m
             } else {
                 service.decideAlbum(.existing(m.album))
@@ -610,23 +613,56 @@ struct AlbumChoiceView: View {
             .onChange(of: generated) { albumName = $0 }
             .onChange(of: searchKey) { _ in refresh(selectBest: false) }
             .onChange(of: query) { found = Albums.search($0) }
-            .alert("把这个账号并进相册名？", isPresented: Binding(get: { merging != nil },
-                                                          set: { if !$0 { merging = nil } }),
-                   presenting: merging) { m in
-                Button("合并并放入") {
-                    working = true
-                    let merged = Albums.mergedName(existing: m.title, adding: resolved)
-                    Task {
-                        if let merged { try? await Albums.rename(m.album, to: merged) }
-                        service.decideAlbum(.existing(m.album))
-                    }
-                }
-                Button("不合并，直接放入") { service.decideAlbum(.existing(m.album)) }
-                Button("取消", role: .cancel) { merging = nil }
-            } message: { m in
-                Text("\(m.title)\n\n合并后相册改名为：\n\(Albums.mergedName(existing: m.title, adding: resolved) ?? m.title)\n\n以后这个账号就能自动对上这个相册。")
+            .sheet(isPresented: Binding(get: { merging != nil }, set: { if !$0 { merging = nil } })) {
+                if let m = merging { mergeSheet(m) }
             }
         }
         .interactiveDismissDisabled()
+    }
+
+    /// 把账号并进相册名：规则只负责给一个初稿，名字最后由用户自己定
+    /// （昵称的变体太多：加表情、加符号、前后加说明文字，规则判断不了哪些该留）
+    private func mergeSheet(_ m: Albums.Match) -> some View {
+        let name = mergedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return NavigationStack {
+            Form {
+                Section {
+                    Text(m.title)
+                } header: {
+                    Text("相册现在的名字")
+                }
+                Section {
+                    TextField("相册名", text: $mergedText, axis: .vertical)
+                        .accessibilityIdentifier("album-merge-name")
+                    Button("恢复成现在的名字") { mergedText = m.title }
+                        .font(.footnote)
+                } header: {
+                    Text("改成")
+                } footer: {
+                    Text("已经把这次的账号加进去了，可以随便改。只要名字里留着「前缀 + ID」这一段，以后这个账号就能自动对上这个相册。")
+                }
+                Section {
+                    Button(name == m.title ? "放入（名字不变）" : "改名并放入") {
+                        working = true
+                        Task {
+                            if name != m.title { try? await Albums.rename(m.album, to: name) }
+                            service.decideAlbum(.existing(m.album))
+                        }
+                    }
+                    .disabled(name.isEmpty || working)
+                    .accessibilityIdentifier("album-merge-confirm")
+                    Button("不改名，直接放入") { service.decideAlbum(.existing(m.album)) }
+                        .disabled(working)
+                }
+            }
+            .navigationTitle("把账号并进相册名")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { merging = nil }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }

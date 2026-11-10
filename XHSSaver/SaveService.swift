@@ -615,7 +615,14 @@ final class SaveService: ObservableObject {
         if videos > 0 { parts.append("\(videos) 个视频") }
         if parts.isEmpty && failures > 0 { throw XHSError("一项都没保存成功") }
         var summary = parts.isEmpty ? "没有保存任何内容" : "已保存 " + parts.joined(separator: "、")
-        if let album = target.album?.localizedTitle { summary += "（相册：\(album)）" }
+        // 存到哪了要说清楚：放进了哪个相册，还是只在图库里
+        if !parts.isEmpty {
+            if let album = target.album?.localizedTitle {
+                summary += "，放进了相册「\(album)」"
+            } else {
+                summary += "，没有放入相册（在图库里）"
+            }
+        }
         if skipped > 0 { summary += "，跳过 \(skipped) 项" }
         if failures > 0 { summary += "，\(failures) 项失败" }
         return (summary, !parts.isEmpty && failures == 0)
