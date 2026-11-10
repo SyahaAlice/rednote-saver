@@ -1,4 +1,5 @@
 import AppIntents
+import UIKit
 
 /// 快捷指令里的「下载到相册」操作：传入链接或整段分享文案即可
 struct SaveNoteIntent: AppIntent {
@@ -21,6 +22,29 @@ struct SaveNoteIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let summary = try await SaveService.shared.save(text: text, mode: quick ? .quick : .organize)
+        return .result(value: summary, dialog: IntentDialog(stringLiteral: summary))
+    }
+}
+
+/// 快捷指令里的「后台快速保存」操作：不打开 App，在后台把链接里的内容全部保存。
+/// 系统给后台操作的时间很短（约 30 秒），适合图文和短视频；大视频、合集用「下载到相册」
+struct QuickSaveIntent: AppIntent {
+    static var title: LocalizedStringResource = "后台快速保存"
+    static var description = IntentDescription("不打开 App，在后台把链接里的内容全部存进相册。系统只给约 30 秒，适合图文和短视频；需要你确认或要用内置浏览器读取的网站会直接报错。")
+    static var openAppWhenRun: Bool = false
+
+    @Parameter(title: "链接或分享文案")
+    var text: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("在后台保存 \(\.$text)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        // App 正好开在前台时照常弹窗；否则没有界面，按后台处理
+        let headless = UIApplication.shared.applicationState != .active
+        let summary = try await SaveService.shared.save(text: text, mode: .quick, headless: headless)
         return .result(value: summary, dialog: IntentDialog(stringLiteral: summary))
     }
 }
@@ -48,6 +72,12 @@ struct GetLinksIntent: AppIntent {
 
 struct XHSShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: QuickSaveIntent(),
+            phrases: ["用\(.applicationName)后台快速保存"],
+            shortTitle: "后台快速保存",
+            systemImageName: "bolt.fill"
+        )
         AppShortcut(
             intent: GetLinksIntent(),
             phrases: ["用\(.applicationName)获取下载直链"],

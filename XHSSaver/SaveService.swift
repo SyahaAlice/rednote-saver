@@ -103,6 +103,10 @@ final class SaveService: ObservableObject {
     /// 这次要下载的直链（解析完就有；预览页里改了勾选或清晰度后会更新）
     @Published private(set) var links: [String] = []
     private var useFallbackForAll = false
+    /// 这次保存没有界面（快捷指令在后台运行）
+    private var headless = false
+    /// 后台运行时没能问出口的最后一个问题
+    private var unanswered: String?
     /// 正在跑的保存任务，「取消」时用
     private var current: Task<String, Error>?
     private var referer = ""
@@ -127,6 +131,12 @@ final class SaveService: ObservableObject {
 
     func ask(_ title: String, _ message: String, options: [String], cancel: String = "跳过") async -> Int? {
         if Task.isCancelled { return nil }  // 已经点了取消，不再弹窗
+        if headless {
+            // 后台运行时没有界面可以弹窗：一律按「没有同意」处理（不改存替代版本、不重复保存、不存整个合集）
+            unanswered = title
+            say("后台运行，问不了「\(title)」，按\(cancel)处理")
+            return nil
+        }
         return await waiting {
             await withCheckedContinuation { (c: CheckedContinuation<Int?, Never>) in
                 promptContinuation = c
@@ -181,9 +191,15 @@ final class SaveService: ObservableObject {
             .contains { s.contains($0) }
     }
 
+    /// 内置浏览器读取页要显示在界面上，后台运行时做不了
+    private func checkCanShowBrowser() throws {
+        if headless { throw XHSError("这个网站要打开 App 用内置浏览器读取，后台做不了。请改用「下载到相册」操作") }
+    }
+
     /// 弹出抖音内置浏览器并等它读到作品数据
     func runCapture(_ cap: DouyinCapture) async throws -> [String: Any] {
         try checkCancelled()
+        try checkCanShowBrowser()
         capture = cap
         defer { capture = nil }
         return try await waiting { try await cap.run() }
@@ -192,6 +208,7 @@ final class SaveService: ObservableObject {
     /// 弹出通用的内置浏览器（Instagram、X、微博）并等它读到帖子数据
     func runCapture(_ cap: WebCapture) async throws -> [String: Any] {
         try checkCancelled()
+        try checkCanShowBrowser()
         webCapture = cap
         defer { webCapture = nil }
         return try await waiting { try await cap.run() }
@@ -200,9 +217,13 @@ final class SaveService: ObservableObject {
     // MARK: - 入口
 
     /// 返回一句结果摘要，例如「已保存 6 张实况照片」
-    func save(text: String, mode: SaveMode = .organize) async throws -> String {
+    /// headless = 没有界面（快捷指令在后台运行）：不弹窗、不开内置浏览器
+    func save(text: String, mode: SaveMode = .organize, headless: Bool = false) async throws -> String {
         guard !isRunning else { throw XHSError("上一个还在保存，请稍等") }
+        guard !(headless && mode == .organize) else { throw XHSError("先预览再保存要打开 App") }
         isRunning = true
+        self.headless = headless
+        unanswered = nil
         phase = .parsing
         log = []
         details = []
@@ -216,13 +237,22 @@ final class SaveService: ObservableObject {
         defer {
             current = nil
             isRunning = false
+            self.headless = false
             BackgroundRun.shared.end(success: phase == .finished)
         }
         // 调用方（比如快捷指令）被取消时，也一起取消
-        return try await withTaskCancellationHandler {
-            try await task.value
-        } onCancel: {
-            task.cancel()
+        do {
+            return try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        } catch {
+            // 后台运行时因为问不了用户而停下的：把原因说清楚，而不是只报一句「已取消」
+            if headless, let q = unanswered {
+                throw XHSError("需要你确认「\(q)」，后台问不了。请改用「下载到相册」操作")
+            }
+            throw error
         }
     }
 
