@@ -52,7 +52,7 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 | `links`、`links-copy` | 「下载直链」一栏（点开 / 复制全部），下载页和预览页都有 |
 | `cancel` | 保存过程中的「取消」按钮（只在保存时出现） |
 | `phase` | 当前阶段。它的「值」是固定的英文代号：`idle`、`parsing`、`waiting-user`、`downloading`、`saving-3-of-9`、`finished`、`failed`、`cancelled` |
-| `capture-cancel`、`capture-reload` | 内置浏览器读取页（Instagram、X、微博、快手）的「取消」「重新加载」 |
+| `capture-cancel`、`capture-reload` | 内置浏览器读取页（抖音、Instagram、X、微博、快手）的「取消」「重新加载」。读取平时在后台进行、不弹页面；等了约 25 秒还没读到，会先弹窗问「要不要打开页面自己处理」，选了「打开页面」这一页才出现 |
 | `login-status`、`login-reload` | 设置里登录页底部的提示和「重新加载」。`login-status` 的「值」：`logged-in`（浏览器里已有登录 cookie，可以点「完成」）、`not-logged-in`、`unknown` |
 | `preview-save`、`preview-cancel`、`preview-quality` | 预览页的「保存到相册（N 项）」「取消」和视频清晰度选择（只有多种清晰度可选时出现） |
 | `stages` | 步骤列表：走过的每一步，进行中的右边是进度（`3 / 9`、百分比） |

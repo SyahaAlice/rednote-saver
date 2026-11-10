@@ -1,4 +1,12 @@
 import SwiftUI
+import WebKit
+
+private func hidden(_ webView: WKWebView) -> some View {
+    WebViewBox(webView: webView)
+        .opacity(0.02)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+}
 
 /// 根界面：下载 / 实况工具 / 设置。替代版本的确认弹窗挂在最外层，任何页面都能弹出
 struct ContentView: View {
@@ -31,11 +39,19 @@ struct ContentView: View {
         .sheet(item: $service.albumRequest) { req in
             AlbumChoiceView(request: req)
         }
-        .sheet(item: $service.capture) { cap in
+        // 内置浏览器读取平时不显示；只有读不到、用户选了「打开页面」才弹出来
+        .sheet(item: Binding(get: { service.captureShown ? service.capture : nil }, set: { _ in })) { cap in
             DouyinCaptureView(capture: cap)
         }
-        .sheet(item: $service.webCapture) { cap in
+        .sheet(item: Binding(get: { service.captureShown ? service.webCapture : nil }, set: { _ in })) { cap in
             WebCaptureView(capture: cap)
+        }
+        .background {
+            // 后台读取时，网页放在主界面底下：看不见、点不到，但页面会像正常打开一样运行
+            if !service.captureShown {
+                if let cap = service.capture { hidden(cap.webView) }
+                if let cap = service.webCapture { hidden(cap.webView) }
+            }
         }
         .sheet(item: $service.previewRequest) { req in
             PreviewView(request: req)

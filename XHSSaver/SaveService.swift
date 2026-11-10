@@ -159,6 +159,10 @@ final class SaveService: ObservableObject {
     /// 这次要下载的直链（解析完就有；预览页里改了勾选或清晰度后会更新）
     @Published private(set) var links: [String] = []
     private var useFallbackForAll = false
+    /// 内置浏览器读取页现在是不是摆在用户面前（平时在后台读，不显示）
+    @Published private(set) var captureShown = false
+    /// 正在问「要不要打开页面自己处理」
+    private var stuckAsking = false
     /// 这次保存没有界面（快捷指令在后台运行）
     private var headless = false
     /// 后台运行时没能问出口的最后一个问题
@@ -268,22 +272,50 @@ final class SaveService: ObservableObject {
         if headless { throw XHSError("这个网站要打开 App 用内置浏览器读取，后台做不了。请改用「下载到相册」操作") }
     }
 
-    /// 弹出抖音内置浏览器并等它读到作品数据
+    /// 用抖音内置浏览器在后台读取作品数据（页面不显示）
     func runCapture(_ cap: DouyinCapture) async throws -> [String: Any] {
         try checkCancelled()
         try checkCanShowBrowser()
         capture = cap
         defer { capture = nil }
-        return try await waiting { try await cap.run() }
+        return try await runHidden { try await cap.run() }
     }
 
-    /// 弹出通用的内置浏览器（Instagram、X、微博）并等它读到帖子数据
+    /// 用通用的内置浏览器（Instagram、X、微博、快手）在后台读取帖子数据（页面不显示）
     func runCapture(_ cap: WebCapture) async throws -> [String: Any] {
         try checkCancelled()
         try checkCanShowBrowser()
         webCapture = cap
         defer { webCapture = nil }
-        return try await waiting { try await cap.run() }
+        return try await runHidden { try await cap.run() }
+    }
+
+    /// 内置浏览器读取：平时在后台进行，页面不摆出来，只在进度里说一句。
+    /// 等了一阵还没读到（多半是网站要登录或验证），才问用户要不要打开页面自己处理
+    private func runHidden(_ run: () async throws -> [String: Any]) async throws -> [String: Any] {
+        captureShown = false
+        let watchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 25_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.stuckAsking = true
+            let open = await self.ask("还没读到作品", "网页可能要你登录或完成验证。要打开页面自己处理吗？",
+                                      options: ["打开页面"], cancel: "取消这次保存")
+            self.stuckAsking = false
+            guard !Task.isCancelled else { return }  // 问的这会儿已经读到了
+            if open != nil {
+                self.captureShown = true
+                self.phase = .waitingUser
+            } else {
+                self.cancel()
+            }
+        }
+        defer {
+            watchdog.cancel()
+            if stuckAsking, prompt != nil { answer(nil) }  // 已经读到了，那句问话不用再答
+            captureShown = false
+            if phase == .waitingUser { phase = .parsing }
+        }
+        return try await run()
     }
 
     // MARK: - 入口

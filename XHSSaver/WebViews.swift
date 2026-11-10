@@ -1,11 +1,28 @@
 import SwiftUI
 import WebKit
 
-/// 包一层 WKWebView 给 SwiftUI 用
+/// 包一层 WKWebView 给 SwiftUI 用。
+/// 网页视图放在一个容器里：同一个网页视图会先放在主界面底下（后台读取），需要时再挪到弹出的页面上，
+/// 谁后出现就归谁
 struct WebViewBox: UIViewRepresentable {
     let webView: WKWebView
-    func makeUIView(context: Context) -> WKWebView { webView }
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    func makeUIView(context: Context) -> UIView {
+        let box = UIView()
+        attach(to: box)
+        return box
+    }
+
+    func updateUIView(_ box: UIView, context: Context) {
+        if webView.superview !== box { attach(to: box) }
+    }
+
+    private func attach(to box: UIView) {
+        webView.removeFromSuperview()
+        webView.frame = box.bounds
+        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        box.addSubview(webView)
+    }
 }
 
 /// 用账号自己的浏览器数据创建网页视图。desktop = 请求桌面网站（与 Safari 的同名功能相同）
