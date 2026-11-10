@@ -208,14 +208,15 @@ def _extract(url, opts):
     多图 / 多视频帖子、合集里的每一项都在列表里"""
     import yt_dlp
     with yt_dlp.YoutubeDL(opts) as ydl:
-        top = ydl.extract_info(url, download=False, process=False)
-        if top.get("_type") in ("playlist", "multi_video"):
-            done = ydl.process_ie_result(top, download=False)
+        # 「原始信息」必须是解析到底、带格式列表的那一份：短链（b23.tv 等）第一层只是一个跳转，
+        # 拿它去下载的话每条流都会重新解析一遍，_compat 也找不到格式、补不上请求头
+        done = ydl.extract_info(url, download=False)
+        if done.get("_type") in ("playlist", "multi_video"):
             entries = [e for e in (done.get("entries") or []) if e]
             if not entries:
                 raise Exception("这个链接里没有可下载的视频")
             return [(_strip(e), e) for e in entries], done
-        return [(top, ydl.process_ie_result(copy.deepcopy(top), download=False))], None
+        return [(_strip(done), done)], None
 
 
 def _compat(info):
