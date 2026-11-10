@@ -234,6 +234,9 @@ final class DouyinCapture: ObservableObject, Identifiable {
         }
     }
 
+    /// 两种打开方式，读到的是同一份作品数据：
+    /// - modalURL（先用）：精选页上弹出这个作品。作品数据整份写在页面里，格式规整，能直接读出来
+    /// - pageURL（备用）：作品页本身。登录后数据是分段夹在页面脚本里的，常常读不出来；未登录时它会去请求详情接口
     var pageURL: URL { URL(string: "https://www.douyin.com/\(target.kind)/\(target.id)")! }
     private var modalURL: URL { URL(string: "https://www.douyin.com/jingxuan?modal_id=\(target.id)")! }
     /// 已经看过几次网页里的数据（「重新加载」时清零）
@@ -289,10 +292,10 @@ final class DouyinCapture: ObservableObject, Identifiable {
             }
             started = true
             polls += 1
-            // 作品页等了一阵还没有：换成「精选页 + 作品浮层」的网址再读一次，那个页面的数据格式更规整
+            // 先用的是「精选页 + 作品浮层」的网址；等了一阵还没有，再换成作品页本身读一次
             if polls == 7 {
                 hint = "换一种方式读取…"
-                webView.load(URLRequest(url: modalURL))
+                webView.load(URLRequest(url: pageURL))
                 continue
             }
             let text = await readPage()
@@ -307,7 +310,7 @@ final class DouyinCapture: ObservableObject, Identifiable {
     }
 
     func run() async throws -> [String: Any] {
-        webView.load(URLRequest(url: pageURL))
+        webView.load(URLRequest(url: modalURL))
         Task { [weak self] in await self?.pollPage() }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 20_000_000_000)
@@ -328,7 +331,7 @@ final class DouyinCapture: ObservableObject, Identifiable {
     func reload() {
         hint = "正在用抖音网页读取作品…"
         polls = 0
-        webView.load(URLRequest(url: pageURL))
+        webView.load(URLRequest(url: modalURL))
     }
 
     func cancel() {
