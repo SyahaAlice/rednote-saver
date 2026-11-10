@@ -1,13 +1,35 @@
 import Foundation
 
+/// 盯着一个下载任务的进度：每变 1% 报一次（已下字节数，总字节数）。服务器没说总大小时不报
+private final class ProgressWatcher: NSObject, URLSessionTaskDelegate {
+    private let report: @Sendable (Int64, Int64) -> Void
+    private var observation: NSKeyValueObservation?
+    private var lastPercent = -1
+
+    init(_ report: @escaping @Sendable (Int64, Int64) -> Void) { self.report = report }
+
+    func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
+        observation = task.progress.observe(\.fractionCompleted) { [weak self, weak task] progress, _ in
+            guard let self, let task else { return }
+            let total = task.countOfBytesExpectedToReceive
+            guard total > 0 else { return }
+            let percent = Int(progress.fractionCompleted * 100)
+            guard percent != self.lastPercent else { return }
+            self.lastPercent = percent
+            self.report(task.countOfBytesReceived, total)
+        }
+    }
+}
+
 /// 下载文件到临时目录；按顺序尝试多个地址，第一个成功的就用
 enum Downloader {
     static func download(_ urls: [URL], to dir: URL, name: String,
-                         referer: String = "https://www.xiaohongshu.com/") async throws -> URL {
+                         referer: String = "https://www.xiaohongshu.com/",
+                         progress: (@Sendable (Int64, Int64) -> Void)? = nil) async throws -> URL {
         var lastError: Error = XHSError("没有可用的下载地址")
         for url in urls {
             do {
-                return try await download(url, to: dir, name: name, referer: referer)
+                return try await download(url, to: dir, name: name, referer: referer, progress: progress)
             } catch {
                 lastError = error
             }
@@ -16,11 +38,13 @@ enum Downloader {
     }
 
     static func download(_ url: URL, to dir: URL, name: String,
-                         referer: String = "https://www.xiaohongshu.com/") async throws -> URL {
+                         referer: String = "https://www.xiaohongshu.com/",
+                         progress: (@Sendable (Int64, Int64) -> Void)? = nil) async throws -> URL {
         var req = URLRequest(url: url, timeoutInterval: 120)
         req.setValue(NoteParser.mobileUA, forHTTPHeaderField: "User-Agent")
         req.setValue(referer, forHTTPHeaderField: "Referer")
-        let (tmp, resp) = try await URLSession.shared.download(for: req)
+        let watcher = progress.map { ProgressWatcher($0) }
+        let (tmp, resp) = try await URLSession.shared.download(for: req, delegate: watcher)
         guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
             try? FileManager.default.removeItem(at: tmp)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? -1

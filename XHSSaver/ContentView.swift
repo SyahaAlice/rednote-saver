@@ -93,7 +93,7 @@ struct DownloadView: View {
         .padding(.top, 12)
     }
 
-    // 输入框 + 粘贴 / 清空（两个按钮挨在一起）
+    // 输入框 + 粘贴 / 清空（两个按钮挨在一起，靠右，右手拇指好按）
     private var inputCard: some View {
         Card {
             ZStack(alignment: .topLeading) {
@@ -110,6 +110,7 @@ struct DownloadView: View {
                     .accessibilityIdentifier("input")
             }
             HStack(spacing: 10) {
+                Spacer()
                 PasteButton(payloadType: String.self) { strings in
                     if let s = strings.first { text = s }
                 }
@@ -124,7 +125,6 @@ struct DownloadView: View {
                 .buttonStyle(ChipButtonStyle())
                 .disabled(text.isEmpty)
                 .accessibilityIdentifier("clear")
-                Spacer()
             }
         }
     }
@@ -177,28 +177,70 @@ struct DownloadView: View {
         .accessibilityIdentifier("cancel")
     }
 
-    // 进度：只显示现在的阶段和最近一条关键信息，其余收在「过程」里
+    /// 步骤右边那一小段字：进行中的显示进度（3 / 9、37%…），结束的显示用了多久
+    private func note(for stage: SaveStage) -> String {
+        guard stage.running else { return SaveStage.duration(stage.total) }
+        switch service.phase {
+        case .saving(let index, let total):
+            let count = total > 1 ? "\(index) / \(total)" : ""
+            if service.transfer.isEmpty { return count }
+            return count.isEmpty ? service.transfer : count + " · " + service.transfer
+        case .downloading:
+            return service.transfer
+        default:
+            return ""
+        }
+    }
+
+    /// 进度条走到哪了（0…1）；现在这一步没有可算的进度时是 nil
+    private var fraction: Double? {
+        // 「37%（12 / 30 MB）」开头的数字
+        let percent = Double(service.transfer.prefix { $0.isNumber }).map { min(1, $0 / 100) }
+        switch service.phase {
+        case .saving(let index, let total):
+            if total > 1 { return (Double(index - 1) + (percent ?? 0)) / Double(total) }
+            return percent
+        case .downloading:
+            return percent
+        default:
+            return nil
+        }
+    }
+
+    /// 给人看的一行里不放长网址：只留到域名
+    private func brief(_ line: String) -> String {
+        line.replacingOccurrences(of: #"(https?://[^/\s）)]+)[^\s）)]*"#, with: "$1/…", options: .regularExpression)
+    }
+
+    // 进度：走过的每一步（带进度和用时）+ 最近一条关键信息，其余收在「过程」里
     private var progressCard: some View {
         Card {
-            HStack {
-                // 给人看的是中文，给自动化操作读的是固定的英文代号（辅助功能的值）
-                Text(service.phase.label)
-                    .font(.headline)
-                    .accessibilityIdentifier("phase")
-                    .accessibilityValue(service.phase.code)
-                Spacer()
-                if service.isRunning { ProgressView().controlSize(.small) }
+            // 给人看的是中文，给自动化操作读的是固定的英文代号（辅助功能的值）
+            Text(service.phase.label)
+                .font(.headline)
+                .accessibilityIdentifier("phase")
+                .accessibilityValue(service.phase.code)
+            if !service.stages.isEmpty {
+                let stopped = service.phase == .failed || service.phase == .cancelled
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(service.stages) { stage in
+                        StageRow(stage: stage, note: note(for: stage),
+                                 broken: stopped && stage.id == service.stages.last?.id)
+                    }
+                }
+                .accessibilityIdentifier("stages")
             }
-            if case .saving(let index, let total) = service.phase, total > 1 {
-                ProgressView(value: Double(index - 1), total: Double(total))
+            if let value = fraction {
+                ProgressView(value: value)
                     .tint(Theme.violet)
             }
             if let last = service.log.last {
-                LogRow(line: last, latest: true)
+                LogRow(line: brief(last), latest: true)
             }
-            if service.isRunning, !service.latest.isEmpty, service.latest != service.log.last {
-                // 现在在干什么：只占一行，不断被最新的一条替换
-                Text(service.latest)
+            if service.isRunning, !service.latest.isEmpty, service.latest != service.log.last,
+               !service.latest.hasPrefix("下载中") {
+                // 现在在干什么：只占一行，不断被最新的一条替换（下载进度已经在上面的步骤里了）
+                Text(brief(service.latest))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -224,6 +266,37 @@ struct DownloadView: View {
                 }
                 .accessibilityIdentifier("details")
             }
+        }
+    }
+}
+
+/// 步骤列表里的一行：状态图标 + 名称 + 右边的进度或用时
+private struct StageRow: View {
+    let stage: SaveStage
+    let note: String
+    /// 流程在这一步失败或被取消
+    let broken: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Group {
+                if stage.running {
+                    ProgressView().controlSize(.small)
+                } else if broken {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.orange)
+                } else {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                }
+            }
+            .frame(width: 18)
+            Text(stage.name)
+                .font(.callout)
+                .foregroundStyle(stage.running ? .primary : .secondary)
+            Spacer(minLength: 8)
+            Text(note)
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
     }
 }

@@ -55,6 +55,17 @@ enum SavePhase: Equatable {
         }
     }
 
+    /// 这个阶段在下载页步骤列表里叫什么；nil = 不算一步（空闲和三种结束状态）
+    var stage: String? {
+        switch self {
+        case .parsing: return "解析"
+        case .waitingUser: return "等你确认"
+        case .downloading: return "下载"
+        case .saving: return "下载并存入相册"
+        default: return nil
+        }
+    }
+
     /// 给自动化操作读的固定英文名（不随界面文字变化）
     var code: String {
         switch self {
@@ -70,13 +81,58 @@ enum SavePhase: Equatable {
     }
 }
 
+/// 流程里的一步，下载页按出现的先后列出来。同一步可能进出好几次（比如保存中途弹窗问一句），时间累加
+struct SaveStage: Identifiable {
+    let name: String
+    /// 已经结束的那几段一共用了多久（秒）
+    var total: Double = 0
+    /// 正在进行的这一段从什么时候开始；nil = 现在不在这一步
+    var since: Date?
+    var id: String { name }
+    var running: Bool { since != nil }
+
+    static func duration(_ s: Double) -> String {
+        s < 60 ? String(format: "%.1f 秒", s) : "\(Int(s) / 60) 分 \(Int(s) % 60) 秒"
+    }
+}
+
 /// 整个保存流程：选解析器 → 解析 → 查重 → 日期/相册 → 下载保存 → 记录
 @MainActor
 final class SaveService: ObservableObject {
     static let shared = SaveService()
 
     @Published private(set) var isRunning = false
-    @Published private(set) var phase = SavePhase.idle
+    @Published private(set) var phase = SavePhase.idle { didSet { trackStage() } }
+    /// 这次保存走过的步骤和各自用的时间（下载页直接列出来）
+    @Published private(set) var stages: [SaveStage] = []
+    /// 当前这个文件下到多少了，例如「37%（12 / 30 MB）」；没有在下大文件时是空的
+    @Published private(set) var transfer = ""
+
+    /// 阶段变了：结束上一步、开始（或回到）下一步
+    private func trackStage() {
+        let name = phase.stage
+        if let i = stages.firstIndex(where: { $0.running }) {
+            if stages[i].name == name { return }
+            if let since = stages[i].since { stages[i].total += Date().timeIntervalSince(since) }
+            stages[i].since = nil
+        }
+        if let name {
+            if let i = stages.firstIndex(where: { $0.name == name }) {
+                stages[i].since = Date()
+            } else {
+                stages.append(SaveStage(name: name, since: Date()))
+            }
+        } else if phase != .idle, !stages.isEmpty {
+            transfer = ""
+            details.append("用时：" + stages.map { "\($0.name) \(SaveStage.duration($0.total))" }.joined(separator: "，"))
+        }
+    }
+
+    /// 直接下载的文件（不经过 yt-dlp）报告进度；小文件不显示，免得一闪而过
+    func transferred(_ done: Int64, of total: Int64) {
+        guard isRunning, total >= 1_048_576 else { return }
+        transfer = "\(done * 100 / total)%（\(done / 1_048_576) / \(total / 1_048_576) MB）"
+    }
     /// 进度里的关键节点（下载页默认只显示这些）
     @Published private(set) var log: [String] = []
     /// 完整过程：关键节点 + 细节（用哪个账号、yt-dlp 的输出、每一项的下载…），下载页里点开才显示
@@ -116,6 +172,8 @@ final class SaveService: ObservableObject {
     func say(_ line: String, detail: Bool = false) {
         details.append(line)
         latest = line
+        // yt-dlp 的下载进度是「下载中 37%（12 / 30 MB）」这样的一行：取后半段给步骤列表显示
+        if line.hasPrefix("下载中 ") { transfer = String(line.dropFirst(4)) } else if line == "一条流下载完成" { transfer = "" }
         if !detail { log.append(line) }
     }
 
@@ -238,6 +296,8 @@ final class SaveService: ObservableObject {
         isRunning = true
         self.headless = headless
         unanswered = nil
+        stages = []
+        transfer = ""
         phase = .parsing
         log = []
         details = []
@@ -462,6 +522,7 @@ final class SaveService: ObservableObject {
         for (i, item) in note.items.enumerated() {
             try checkCancelled()
             phase = .saving(index: i + 1, total: note.items.count)
+            transfer = ""
             let n = String(format: "%02d", i + 1)
             do {
                 switch item.kind {
@@ -509,6 +570,11 @@ final class SaveService: ObservableObject {
         return (summary, !parts.isEmpty && failures == 0)
     }
 
+    /// 交给 Downloader 的进度回调（它在后台线程上调用，这里转回主线程）
+    private static let reportTransfer: @Sendable (Int64, Int64) -> Void = { done, total in
+        Task { @MainActor in SaveService.shared.transferred(done, of: total) }
+    }
+
     /// 已下载好的文件直接用；否则先下首选地址，失败时问用户是否改用替代版本。返回 nil 表示跳过
     private func fileFor(_ item: NoteMedia, dir: URL, name: String, what: String) async throws -> URL? {
         if let e = item.error { throw XHSError(e) }
@@ -516,7 +582,8 @@ final class SaveService: ObservableObject {
         var firstError: Error?
         if !item.original.isEmpty {
             do {
-                return try await Downloader.download(item.original, to: dir, name: name, referer: referer)
+                return try await Downloader.download(item.original, to: dir, name: name, referer: referer,
+                                                     progress: Self.reportTransfer)
             } catch {
                 try checkCancelled()
                 firstError = error
