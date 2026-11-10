@@ -1,7 +1,7 @@
 import SwiftUI
 import WebKit
 
-private func hidden(_ webView: WKWebView) -> some View {
+private func hiddenWeb(_ webView: WKWebView) -> some View {
     WebViewBox(webView: webView)
         .opacity(0.02)
         .allowsHitTesting(false)
@@ -49,8 +49,8 @@ struct ContentView: View {
         .background {
             // 后台读取时，网页放在主界面底下：看不见、点不到，但页面会像正常打开一样运行
             if !service.captureShown {
-                if let cap = service.capture { hidden(cap.webView) }
-                if let cap = service.webCapture { hidden(cap.webView) }
+                if let cap = service.capture { hiddenWeb(cap.webView) }
+                if let cap = service.webCapture { hiddenWeb(cap.webView) }
             }
         }
         .sheet(item: $service.previewRequest) { req in
