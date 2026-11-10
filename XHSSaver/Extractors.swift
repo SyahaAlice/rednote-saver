@@ -259,78 +259,14 @@ struct GenericExtractor: SiteExtractor {
     /// 这些网站不走 gallery-dl：Instagram 用它容易触发验证，这里到的是帖子以外的链接（主页、快拍），交给 yt-dlp
     static let skipGallery: Set<String> = ["instagram.com"]
 
-    /// 这个网址能不能处理：App 自己有解析器，或者 yt-dlp / gallery-dl 里有专门的提取器
-    private static func recognized(_ url: URL) async -> Bool {
-        if !(Extractors.pick(for: url) is GenericExtractor) { return true }
-        return await YtDlp.supports(url).any
-    }
-
-    /// 手机版网址换成电脑版的写法（m.bilibili.com → www.bilibili.com）：有些提取器只认电脑版
-    private static func desktopForm(_ url: URL) -> URL? {
-        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: true), let host = comps.host else { return nil }
-        for prefix in ["m.", "mobile."] where host.hasPrefix(prefix) {
-            comps.host = "www." + String(host.dropFirst(prefix.count))
-            return comps.url
-        }
-        return nil
-    }
-
-    /// 短链：一步一步跟着跳转走，走到第一个认识的网址就停，返回它；一直没遇到就返回最后停下的网址。
-    /// 不能让系统自动跟到底：比如 b23.tv 先跳到 www.bilibili.com（认识），再被跳到手机版 m.bilibili.com（不认识）
-    private static func followRedirects(_ start: URL) async -> URL? {
-        let session = URLSession(configuration: .ephemeral)
-        defer { session.finishTasksAndInvalidate() }
-        let stopper = NoRedirect()
-        var url = start
-        for _ in 0..<8 {
-            var req = URLRequest(url: url, timeoutInterval: 15)
-            req.setValue(NoteParser.mobileUA, forHTTPHeaderField: "User-Agent")
-            guard let got = try? await session.data(for: req, delegate: stopper) else { break }
-            guard let http = got.1 as? HTTPURLResponse, (300..<400).contains(http.statusCode),
-                  let loc = http.value(forHTTPHeaderField: "Location"),
-                  let next = URL(string: loc, relativeTo: url)?.absoluteURL else { break }
-            url = next
-            if await recognized(url) { return url }
-        }
-        return url == start ? nil : url
-    }
-
+    /// 不限制网站：任何网址都先交给 gallery-dl 试，不行再交给 yt-dlp（包括它的「通用」提取器，短链也由它跟随跳转）。
+    /// 解析不出东西时由它们报错；「确实解析到了媒体才往下走」的检查在 SaveService.attempt 里
     func extract(_ url: URL, service: SaveService) async throws -> ParsedNote {
-        // 先验证：只有 yt-dlp 或 gallery-dl 里有专门提取器的网站才去解析，其它的直接报错
-        var target = url
-        var known = await YtDlp.supports(target)
-        if !known.any {
-            // 可能是短链（比如 b23.tv）：跟过去看落在哪个网站
-            service.say("不认识这个网址，看看它跳转到哪里…", detail: true)
-            if let final = await Self.followRedirects(url) {
-                try Task.checkCancellation()
-                service.say("跳转到：\(final.host ?? final.absoluteString)", detail: true)
-                let picked = Extractors.pick(for: final)
-                if !(picked is GenericExtractor) { return try await picked.extract(final, service: service) }
-                target = final
-                known = await YtDlp.supports(final)
-            }
-        }
-        if !known.any, let desktop = Self.desktopForm(target) {
-            // 手机版网址：换成电脑版的写法再认一次
-            let again = await YtDlp.supports(desktop)
-            if again.any {
-                service.say("按电脑版网址处理：\(desktop.host ?? "")", detail: true)
-                target = desktop
-                known = again
-            }
-        }
-        guard known.any else {
-            throw XHSError("不支持这个网站：\(target.host ?? target.absoluteString)")
-        }
-        if known.gallery, !Self.skipGallery.contains(CookiePool.site(of: target.host ?? "")),
-           let note = try await galleryNote(target, service: service) {
+        if !Self.skipGallery.contains(CookiePool.site(of: url.host ?? "")),
+           let note = try await galleryNote(url, service: service) {
             return note
         }
-        guard known.ytdlp else {
-            throw XHSError("没有解析到可以保存的图片或视频（细节在「过程」里）")
-        }
-        return try await YtDlpExtractor().extract(target, service: service)
+        return try await YtDlpExtractor().extract(url, service: service)
     }
 }
 
