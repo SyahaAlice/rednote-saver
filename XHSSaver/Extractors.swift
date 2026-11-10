@@ -152,15 +152,7 @@ func galleryNote(_ url: URL, service: SaveService) async throws -> ParsedNote? {
             if let selection {
                 return all.enumerated().filter { selection.contains($0.offset) }.map { $0.element }
             }
-            switch await service.ask("这个链接里有 \(count) 项\(more ? "以上（已到单次上限）" : "")",
-                                     "看起来是主页或合集。要全部保存吗？",
-                                     options: ["全部保存（\(count) 项）", "只存第 1 项"], cancel: "不存了") {
-            case 0?: return all
-            case 1?: return Array(all.prefix(1))
-            default:
-                service.cancel()
-                throw XHSError.cancelled
-            }
+            return try await service.askSaveAll(count: count, what: "主页或合集", more: more) ? all : Array(all.prefix(1))
         }
     }
     return note
@@ -396,15 +388,8 @@ struct YtDlpExtractor: SiteExtractor {
                     only = selection.filter { $0 < count }.sorted().map { $0 + 1 }  // dlcore 里从 1 数起
                 } else if count > YtDlpExtractor.askAbove {
                     // 没有预览时：多图 / 多视频帖子不会超过 20 项，再多就是合集或播放列表，先问一句
-                    switch await service.ask("这个链接里有 \(count) 项",
-                                             "看起来是合集或播放列表。要全部保存吗？",
-                                             options: ["全部保存（\(count) 项）", "只存第 1 项"], cancel: "不存了") {
-                    case 0?: break
-                    case 1?: limit = 1
-                    default:
-                        service.cancel()  // 当作用户取消：不再弹后续的提问
-                        throw XHSError.cancelled
-                    }
+                    let all = try await service.askSaveAll(count: count, what: "合集或播放列表")
+                    if !all { limit = 1 }
                 }
                 var items: [NoteMedia] = []
                 if only?.isEmpty != true {

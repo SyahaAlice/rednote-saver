@@ -145,6 +145,20 @@ final class SaveService: ObservableObject {
         }
     }
 
+    /// 一个链接里项数太多（what：「主页或合集」「合集或播放列表」）时先问一句。
+    /// 返回 true = 全部保存，false = 只存第 1 项；选「不存了」就取消这次保存并抛错
+    func askSaveAll(count: Int, what: String, more: Bool = false) async throws -> Bool {
+        switch await ask("这个链接里有 \(count) 项\(more ? "以上（已到单次上限）" : "")",
+                         "看起来是\(what)。要全部保存吗？",
+                         options: ["全部保存（\(count) 项）", "只存第 1 项"], cancel: "不存了") {
+        case 0?: return true
+        case 1?: return false
+        default:
+            cancel()  // 当作用户取消：不再弹后续的提问
+            throw XHSError.cancelled
+        }
+    }
+
     func answer(_ index: Int?) {
         prompt = nil
         promptContinuation?.resume(returning: index)
