@@ -25,8 +25,35 @@ struct SaveNoteIntent: AppIntent {
     }
 }
 
+/// 快捷指令里的「获取下载直链」操作：只解析，不保存，把每一项的下载地址交给后面的操作
+struct GetLinksIntent: AppIntent {
+    static var title: LocalizedStringResource = "获取下载直链"
+    static var description = IntentDescription("只解析，不保存：返回链接里每一项的下载地址（视频取最高清晰度），可以接着交给别的操作。")
+    /// 有些网站要用 App 里的内置浏览器读取，所以也打开 App 在前台做
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "链接或分享文案")
+    var text: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("获取 \(\.$text) 的下载直链")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ReturnsValue<[String]> {
+        _ = try await SaveService.shared.save(text: text, mode: .links)
+        return .result(value: SaveService.shared.links)
+    }
+}
+
 struct XHSShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: GetLinksIntent(),
+            phrases: ["用\(.applicationName)获取下载直链"],
+            shortTitle: "获取下载直链",
+            systemImageName: "link"
+        )
         AppShortcut(
             intent: SaveNoteIntent(),
             phrases: ["用\(.applicationName)下载到相册"],

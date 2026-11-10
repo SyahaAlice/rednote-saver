@@ -249,7 +249,7 @@ final class SaveService: ObservableObject {
     private func run(text: String, mode: SaveMode) async throws -> String {
         do {
             guard let url = NoteParser.extractURL(text) else { throw XHSError("没找到链接") }
-            try await PhotoSaver.ensureAccess()
+            if mode != .links { try await PhotoSaver.ensureAccess() }  // 只拿直链不碰相册
             let summary: String
             do {
                 summary = try await attempt(url, mode: mode)
@@ -304,6 +304,12 @@ final class SaveService: ObservableObject {
         if let a = note.author { say("作者：\(a.name)（\(a.primaryID)）") }
 
         links = note.links(selection: nil, height: 0)
+
+        // 只要直链（快捷指令「获取下载直链」）：到这里就结束，不下载、不保存、不记下载记录
+        if mode == .links {
+            guard !links.isEmpty else { throw XHSError("这个作品没有可以直接下载的地址") }
+            return "解析到 \(links.count) 个下载直链"
+        }
 
         // 「解析」：下载之前先预览，勾选要保存的项、选视频清晰度。selection 是选中的下标。
         // 「快速保存」：不预览、不选相册，全部保存，视频取最高清晰度
