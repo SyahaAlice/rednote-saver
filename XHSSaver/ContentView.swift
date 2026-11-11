@@ -67,6 +67,14 @@ struct ContentView: View {
         .onChange(of: scenePhase) { phase in
             if phase == .active { Task { await WebAccounts.shared.renewDue() } }
         }
+        // 保存结束时轻轻震一下：不看屏幕也知道是成了还是没成
+        .onChange(of: service.phase) { phase in
+            if phase == .finished {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            } else if phase == .failed {
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        }
     }
 }
 
@@ -91,6 +99,13 @@ struct DownloadView: View {
         guard autoPaste, !service.isRunning else { return }
         let board = UIPasteboard.general
         guard board.changeCount != seenClip else { return }
+        paste()
+    }
+
+    /// 把剪贴板里的文字填进输入框（没有文字就不动）。App 自己读剪贴板，系统可能弹「允许粘贴」；
+    /// 在系统设置里把「从其他 App 粘贴」设成「允许」后就不弹了
+    private func paste() {
+        let board = UIPasteboard.general
         seenClip = board.changeCount
         guard board.hasStrings || board.hasURLs else { return }
         let s = (board.string ?? board.url?.absoluteString ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -173,7 +188,7 @@ struct DownloadView: View {
 
     // 输入框；下面一行靠右：一个位置轮流放「粘贴」和「清空」，它右边是「自动粘贴」开关。
     // 空的时候是粘贴，有内容就变成清空，可以在同一个地方连着按。
-    // 「粘贴」用系统的粘贴按钮（自己读剪贴板会弹「允许粘贴」，系统按钮不会）
+    // 两个按钮是同一种样式。「粘贴」是 App 自己读剪贴板（不用系统的粘贴按钮：它的样子改不了，和「清空」对不上）
     private var inputCard: some View {
         Card {
             ZStack(alignment: .topLeading) {
@@ -193,12 +208,13 @@ struct DownloadView: View {
                 Spacer()
                 ZStack {
                     if text.isEmpty {
-                        PasteButton(payloadType: String.self) { strings in
-                            if let s = strings.first { text = s }
+                        Button {
+                            paste()
+                        } label: {
+                            Label("粘贴", systemImage: "doc.on.clipboard")
                         }
-                        .buttonBorderShape(.capsule)
-                        .labelStyle(.titleAndIcon)
-                        .tint(.accentColor)
+                        .buttonStyle(ChipButtonStyle())
+                        .accessibilityIdentifier("paste")
                     } else {
                         Button {
                             text = ""
