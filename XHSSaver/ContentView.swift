@@ -77,6 +77,22 @@ struct DownloadView: View {
     @State private var showDetails = false
     @State private var showAlbum = false
     @FocusState private var editing: Bool
+    @Environment(\.scenePhase) private var scenePhase
+    /// 上次看到的剪贴板编号（内容每变一次，系统把编号加一）。nil = 刚打开 App，还没看过
+    @State private var seenClip: Int?
+
+    /// 打开 App、从别处切回来时，剪贴板里有新的文字就直接填进输入框。
+    /// 只在编号变了的时候读：系统每读一次都可能弹「允许粘贴」，同样的内容不读第二遍。
+    /// 正在保存时不动输入框，也不记编号，等下次切回来再填
+    private func pasteIfNew() {
+        guard !service.isRunning else { return }
+        let board = UIPasteboard.general
+        guard board.changeCount != seenClip else { return }
+        seenClip = board.changeCount
+        guard board.hasStrings || board.hasURLs else { return }
+        let s = (board.string ?? board.url?.absoluteString ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !s.isEmpty { text = s }
+    }
 
     private var empty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -103,6 +119,11 @@ struct DownloadView: View {
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .animation(.easeInOut(duration: 0.2), value: service.log.count)
+            .onAppear { if seenClip == nil { pasteIfNew() } }
+            .onChange(of: scenePhase) { phase in
+                // 离开时记下编号：在 App 里自己复制的东西（比如下载直链）回来时不会被填进去
+                if phase == .active { pasteIfNew() } else { seenClip = UIPasteboard.general.changeCount }
+            }
             .sheet(isPresented: $showAlbum) {
                 if let album = service.savedAlbum {
                     NavigationStack { AlbumDetailView(album: album, showsDone: true) }
