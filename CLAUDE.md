@@ -50,7 +50,8 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 
 | 标识 | 是什么 |
 |---|---|
-| `input` | 下载页的输入框。打开 App、从别处切回来时，剪贴板里有新的文字会自动填进去（系统可能先弹「允许粘贴」） |
+| `input` | 下载页的输入框 |
+| `auto-paste` | 输入框下面左边的「自动粘贴」开关（默认关）。开着时，打开 App、从别处切回来，剪贴板里有新的文字会自动替换输入框里的内容（系统可能先弹「允许粘贴」） |
 | `parse` | 「解析」按钮：先预览、选相册再保存 |
 | `quick-save` | 「快速保存」按钮：不预览、不问相册，全部保存（有完全匹配的相册会自动放入） |
 | `album-confirm`、`album-search` | 「放进哪个相册」页底部的主按钮（文字随当前选择变）和「搜索全部相册」输入框（输入后列表换成搜索结果） |
@@ -60,7 +61,7 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 | `albums-search`、`albums-filter`、`albums-select`、`albums-merge` | 「相册」页底部：搜索框、筛选（全部 / 手写的名字 / 可能重复）、「多选」、多选后的「合并选中的 N 个相册」 |
 | `album-detail-rename`、`album-detail-merge`、`album-detail-select`、`album-detail-delete` | 相册内容页底部：改名、合并到…、选择照片、删除相册 |
 | `album-remove`、`album-move` | 相册内容页选了照片之后：移出相册、移到… |
-| `clear` | 清空输入框 |
+| `clear` | 清空输入框。它和系统的「粘贴」按钮共用输入框右下角的一个位置：输入框空着时那里是「粘贴」，有内容时是「清空」；刚换过来的 0.6 秒内不接受点按 |
 | `links`、`links-copy` | 「下载直链」一栏（点开 / 复制全部），下载页和预览页都有 |
 | `cancel` | 保存过程中的「取消」按钮（只在保存时出现） |
 | `phase` | 当前阶段。它的「值」是固定的英文代号：`idle`、`parsing`、`waiting-user`、`downloading`、`saving-3-of-9`、`finished`、`failed`、`cancelled` |

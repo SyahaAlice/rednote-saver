@@ -417,19 +417,23 @@ private struct AssetViewer: View {
     @State private var player: AVPlayer?
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Color.black.ignoresSafeArea()
+        // 内容在「关闭」上面剩下的地方居中（以前整个贴着底边放，照片会偏下）
+        ZStack {
             if let player {
                 VideoPlayer(player: player)
             } else if let image {
                 Image(uiImage: image).resizable().scaledToFit()
             } else {
-                ProgressView().tint(.white).frame(maxHeight: .infinity)
+                ProgressView().tint(.white)
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom) {
             Button("关闭") { dismiss() }
                 .buttonStyle(ChipButtonStyle())
-                .padding(.bottom, asset.mediaType == .video ? 70 : 24)
+                .padding(.vertical, 10)
         }
+        .background(Color.black.ignoresSafeArea())
         .task {
             if asset.mediaType == .video {
                 if let item = await Albums.playerItem(asset) {

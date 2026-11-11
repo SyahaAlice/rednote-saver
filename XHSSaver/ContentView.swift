@@ -80,12 +80,15 @@ struct DownloadView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// 上次看到的剪贴板编号（内容每变一次，系统把编号加一）。nil = 刚打开 App，还没看过
     @State private var seenClip: Int?
+    @AppStorage(Prefs.autoPasteKey) private var autoPaste = false
+    /// 粘贴 / 清空刚换过位：这一小段时间里不接受点按，免得连点两下把刚粘贴的又清掉
+    @State private var swapHold = false
 
-    /// 打开 App、从别处切回来时，剪贴板里有新的文字就直接填进输入框。
+    /// 「自动粘贴」开着时：打开 App、从别处切回来，剪贴板里有新的文字就直接替换输入框里的内容。
     /// 只在编号变了的时候读：系统每读一次都可能弹「允许粘贴」，同样的内容不读第二遍。
     /// 正在保存时不动输入框，也不记编号，等下次切回来再填
     private func pasteIfNew() {
-        guard !service.isRunning else { return }
+        guard autoPaste, !service.isRunning else { return }
         let board = UIPasteboard.general
         guard board.changeCount != seenClip else { return }
         seenClip = board.changeCount
@@ -100,9 +103,8 @@ struct DownloadView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
-                    header
-                    // 输入框和按钮往下放一段，落在屏幕中间，单手够得到
-                    Color.clear.frame(height: 84)
+                    // 顶上留空（没有标题和图标），输入框和按钮落在屏幕中间，单手够得到
+                    Color.clear.frame(height: 170)
                     if !web.offline.isEmpty { offlineCard }
                     inputCard
                     actionButtons
@@ -132,25 +134,6 @@ struct DownloadView: View {
         }
     }
 
-    // 顶部：品牌图形 + 名称
-    private var header: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Theme.gradient)
-                    .frame(width: 56, height: 56)
-                Image(systemName: "arrow.down.to.line.compact")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            .shadow(color: Theme.violet.opacity(0.35), radius: 10, y: 5)
-            Text("多功能媒体下载器")
-                .font(.title2.weight(.bold))
-            Spacer(minLength: 0)
-        }
-        .padding(.top, 12)
-    }
-
     // 自动续期时发现掉线的账号：提示一下，可以直接去设置重新登录
     private var offlineCard: some View {
         Card {
@@ -173,7 +156,9 @@ struct DownloadView: View {
         }
     }
 
-    // 输入框 + 粘贴 / 清空（两个按钮挨在一起，靠右，右手拇指好按）
+    // 输入框；下面一行左边是「自动粘贴」开关，右边一个位置轮流放「粘贴」和「清空」：
+    // 空的时候是粘贴，有内容就变成清空，可以在同一个地方连着按。
+    // 「粘贴」用系统的粘贴按钮（自己读剪贴板会弹「允许粘贴」，系统按钮不会）
     private var inputCard: some View {
         Card {
             ZStack(alignment: .topLeading) {
@@ -190,22 +175,39 @@ struct DownloadView: View {
                     .accessibilityIdentifier("input")
             }
             HStack(spacing: 10) {
+                Toggle("自动粘贴", isOn: $autoPaste)
+                    .toggleStyle(.switch)
+                    .tint(Theme.violet)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .accessibilityIdentifier("auto-paste")
                 Spacer()
-                PasteButton(payloadType: String.self) { strings in
-                    if let s = strings.first { text = s }
+                ZStack {
+                    if text.isEmpty {
+                        PasteButton(payloadType: String.self) { strings in
+                            if let s = strings.first { text = s }
+                        }
+                        .buttonBorderShape(.capsule)
+                        .labelStyle(.titleAndIcon)
+                        .tint(.accentColor)
+                    } else {
+                        Button {
+                            text = ""
+                        } label: {
+                            Label("清空", systemImage: "xmark")
+                        }
+                        .buttonStyle(ChipButtonStyle())
+                        .accessibilityIdentifier("clear")
+                    }
                 }
-                .buttonBorderShape(.capsule)
-                .labelStyle(.titleAndIcon)
-                .tint(.accentColor)
-                Button {
-                    text = ""
-                } label: {
-                    Label("清空", systemImage: "xmark")
-                }
-                .buttonStyle(ChipButtonStyle())
-                .disabled(text.isEmpty)
-                .accessibilityIdentifier("clear")
+                .frame(minWidth: 92, minHeight: 36, alignment: .trailing)
+                .allowsHitTesting(!swapHold)
             }
+        }
+        .onChange(of: text.isEmpty) { _ in
+            swapHold = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { swapHold = false }
         }
     }
 

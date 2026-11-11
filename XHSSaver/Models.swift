@@ -120,6 +120,8 @@ enum Prefs {
     }
 
     static let imageFormatKey = "imageFormat"
+    /// 下载页「自动粘贴」开关：打开 App、切回来时把剪贴板里的新文字填进输入框
+    static let autoPasteKey = "autoPaste"
     static let usePublishDateKey = "usePublishDate"
     static let albumPrefixesKey = "albumPrefixes"
 
