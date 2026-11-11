@@ -26,6 +26,7 @@ struct SettingsView: View {
     /// 账号一节的详细说明平时收起
     @State private var showAccountHelp = false
     @AppStorage(WebAccounts.autoRenewKey) private var autoRenew = true
+    @AppStorage(Prefs.animationStyleKey) private var animationStyle = "simple"
     /// 导出 / 导入账号
     @State private var exportDocument: CookieBundleDocument?
     @State private var showExport = false
@@ -70,6 +71,16 @@ struct SettingsView: View {
                     Label("保存", systemImage: "square.and.arrow.down")
                 } footer: {
                     Text("HEIC 是小红书存的原文件；JPEG / PNG 由小红书服务器转换，分辨率不变。")
+                }
+
+                Section {
+                    Picker("下载页顶部动画", selection: $animationStyle) {
+                        Text("简洁").tag("simple")
+                        Text("丰富").tag("rich")
+                    }
+                    .accessibilityIdentifier("animation-style")
+                } header: {
+                    Label("界面", systemImage: "sparkles")
                 }
 
                 Section {

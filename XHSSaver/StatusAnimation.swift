@@ -1,8 +1,10 @@
 import SwiftUI
 
 /// 下载页顶上的状态动画：全部是纯色的平面图形，用 Canvas 实时画，不带任何素材。
-/// 三层：背景的大色块和点阵；16 个小图形在三条轨道上绕着中心转；中间的圆和两圈细环。
-/// 每个状态有自己的动作（见 StatusAnimationModel.render），切换时各个图形快慢不同地过渡过去。
+/// 有两种样式，在设置页选：
+/// - 简洁（默认）：只有三个图形，靠变形和弹性表达状态，见 StatusAnimationSimple.swift
+/// - 丰富（备用）：三层——背景的大色块和点阵、16 个小图形在三条轨道上绕着中心转、中间的圆和两圈细环，
+///   见下面的 StatusAnimationModel
 /// 只是装饰：不接受点按，辅助功能里看不到（状态由 `phase` 标识给出）
 struct StatusAnimation: View {
     enum Kind: Int, CaseIterable {
@@ -17,12 +19,18 @@ struct StatusAnimation: View {
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var model = StatusAnimationModel()
+    @AppStorage(Prefs.animationStyleKey) private var style = "simple"
+    @State private var simple = SimpleAnimationModel()
+    @State private var rich = StatusAnimationModel()
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 60, paused: paused || reduceMotion)) { line in
             Canvas { g, size in
-                model.render(g, size: size, dark: scheme == .dark, date: line.date, kind: kind, progress: progress)
+                if style == "rich" {
+                    rich.render(g, size: size, dark: scheme == .dark, date: line.date, kind: kind, progress: progress)
+                } else {
+                    simple.render(g, size: size, dark: scheme == .dark, date: line.date, kind: kind, progress: progress)
+                }
             }
         }
         .allowsHitTesting(false)
@@ -30,7 +38,7 @@ struct StatusAnimation: View {
     }
 }
 
-/// 动画的全部状态和画法。是引用类型：每一帧在 Canvas 里直接改，不经过 SwiftUI 的状态更新
+/// 「丰富」样式的全部状态和画法。是引用类型：每一帧在 Canvas 里直接改，不经过 SwiftUI 的状态更新
 final class StatusAnimationModel {
     private typealias Kind = StatusAnimation.Kind
 
