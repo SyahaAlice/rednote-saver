@@ -171,7 +171,7 @@ struct DownloadView: View {
         }
     }
 
-    // 输入框；下面一行左边是「自动粘贴」开关，右边一个位置轮流放「粘贴」和「清空」：
+    // 输入框；下面一行靠右：一个位置轮流放「粘贴」和「清空」，它右边是「自动粘贴」开关。
     // 空的时候是粘贴，有内容就变成清空，可以在同一个地方连着按。
     // 「粘贴」用系统的粘贴按钮（自己读剪贴板会弹「允许粘贴」，系统按钮不会）
     private var inputCard: some View {
@@ -190,13 +190,6 @@ struct DownloadView: View {
                     .accessibilityIdentifier("input")
             }
             HStack(spacing: 10) {
-                Toggle("自动粘贴", isOn: $autoPaste)
-                    .toggleStyle(.switch)
-                    .tint(Theme.violet)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-                    .accessibilityIdentifier("auto-paste")
                 Spacer()
                 ZStack {
                     if text.isEmpty {
@@ -218,6 +211,13 @@ struct DownloadView: View {
                 }
                 .frame(minWidth: 92, minHeight: 36, alignment: .trailing)
                 .allowsHitTesting(!swapHold)
+                Toggle("自动粘贴", isOn: $autoPaste)
+                    .toggleStyle(.switch)
+                    .tint(Theme.violet)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .accessibilityIdentifier("auto-paste")
             }
         }
         .onChange(of: text.isEmpty) { _ in
