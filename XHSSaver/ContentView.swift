@@ -381,7 +381,7 @@ private struct LogRow: View {
 /// 2. 放进已有相册：自动找到的按可靠程度列出（完全匹配的默认选中），也可以自己输入文字搜
 /// 3. 或者新建相册 / 不放入相册
 /// 底下一个主按钮，文字跟着当前的选择变。
-/// 放进一个名字里还没有这个账号的相册时，会问要不要把账号并进相册名（按小号规则）
+/// 放进已有相册时直接放入、不问改名；要把这次的账号写进相册名，走「给这个相册改名」
 struct AlbumChoiceView: View {
     let request: AlbumRequest
     @ObservedObject private var service = SaveService.shared
@@ -401,9 +401,9 @@ struct AlbumChoiceView: View {
     @State private var found: [Albums.Match] = []
     @State private var query = ""
     @State private var choice = Choice.create
-    /// 正在问「要不要把账号并进相册名」
+    /// 正在给这个相册改名（从「给这个相册改名」进来的，不点不会出现）
     @State private var merging: Albums.Match?
-    /// 合并后的相册名：先按规则生成一个，用户可以随便改
+    /// 新的相册名：先按规则生成一个，用户可以随便改
     @State private var mergedText = ""
     @State private var working = false
     @State private var editAuthor = false
@@ -492,15 +492,16 @@ struct AlbumChoiceView: View {
         case .create:
             service.decideAlbum(.create(albumName.trimmingCharacters(in: .whitespaces)))
         case .existing:
+            // 直接放入，不问改名：改名是另一个入口（列表下面的「给这个相册改名」）
             guard let m = chosen else { return }
-            // 相册名里还没有这次的账号：问要不要并进去；已经有了就直接放入
-            if let suggestion = Albums.mergedName(existing: m.title, adding: resolved) {
-                mergedText = suggestion
-                merging = m
-            } else {
-                service.decideAlbum(.existing(m.album))
-            }
+            service.decideAlbum(.existing(m.album))
         }
+    }
+
+    /// 打开改名页。名字里还没有这次的账号时，先按规则把账号加进去当初稿
+    private func startRename(_ m: Albums.Match) {
+        mergedText = Albums.mergedName(existing: m.title, adding: resolved) ?? m.title
+        merging = m
     }
 
     var body: some View {
@@ -562,6 +563,11 @@ struct AlbumChoiceView: View {
                     if matches.isEmpty {
                         Text("没有自动找到这个作者的相册").foregroundStyle(.secondary)
                     }
+                    if let m = chosen {
+                        Button("给这个相册改名…") { startRename(m) }
+                            .font(.footnote)
+                            .accessibilityIdentifier("album-rename")
+                    }
                     HStack {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                         TextField("搜索相册名", text: $query)
@@ -572,7 +578,7 @@ struct AlbumChoiceView: View {
                 } header: {
                     Text("放进已有相册")
                 } footer: {
-                    Text("知道是同一个作者、但名字对不上的相册，可以搜出来选它。")
+                    Text("知道是同一个作者、但名字对不上的相册，可以搜出来选它。放入时不会改相册的名字；想把这次的账号写进相册名（以后能自动对上），用「给这个相册改名」。")
                 }
 
                 Section {
@@ -620,7 +626,7 @@ struct AlbumChoiceView: View {
         .interactiveDismissDisabled()
     }
 
-    /// 把账号并进相册名：规则只负责给一个初稿，名字最后由用户自己定
+    /// 给相册改名（顺便把这次的账号写进去）：规则只负责给一个初稿，名字最后由用户自己定
     /// （昵称的变体太多：加表情、加符号、前后加说明文字，规则判断不了哪些该留）
     private func mergeSheet(_ m: Albums.Match) -> some View {
         let name = mergedText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -639,23 +645,21 @@ struct AlbumChoiceView: View {
                 } header: {
                     Text("改成")
                 } footer: {
-                    Text("已经把这次的账号加进去了，可以随便改。只要名字里留着「前缀 + ID」这一段，以后这个账号就能自动对上这个相册。")
+                    Text("可以随便改。名字里留着这次账号的「前缀 + ID」，以后这个账号就能自动对上这个相册。")
                 }
                 Section {
-                    Button(name == m.title ? "放入（名字不变）" : "改名并放入") {
+                    Button("改名并放入") {
                         working = true
                         Task {
-                            if name != m.title { try? await Albums.rename(m.album, to: name) }
+                            try? await Albums.rename(m.album, to: name)
                             service.decideAlbum(.existing(m.album))
                         }
                     }
-                    .disabled(name.isEmpty || working)
+                    .disabled(name.isEmpty || name == m.title || working)
                     .accessibilityIdentifier("album-merge-confirm")
-                    Button("不改名，直接放入") { service.decideAlbum(.existing(m.album)) }
-                        .disabled(working)
                 }
             }
-            .navigationTitle("把账号并进相册名")
+            .navigationTitle("给相册改名")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
