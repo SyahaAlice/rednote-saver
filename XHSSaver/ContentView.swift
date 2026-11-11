@@ -99,12 +99,27 @@ struct DownloadView: View {
 
     private var empty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
+    /// 顶部动画该演哪一种（取消了就回到空闲的样子）
+    private var animationKind: StatusAnimation.Kind {
+        switch service.phase {
+        case .idle, .cancelled: return .idle
+        case .parsing: return .parsing
+        case .waitingUser: return .waiting
+        case .downloading: return .downloading
+        case .saving: return .saving
+        case .finished: return .finished
+        case .failed: return .failed
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
-                    // 顶上留空（没有标题和图标），输入框和按钮落在屏幕中间，单手够得到
-                    Color.clear.frame(height: 170)
+                    // 顶上不放标题和图标，放一块跟着状态变的动画；输入框和按钮落在屏幕中间，单手够得到
+                    StatusAnimation(kind: animationKind, progress: fraction,
+                                    paused: scenePhase != .active || service.selectedTab != 0)
+                        .frame(height: 170)
                     if !web.offline.isEmpty { offlineCard }
                     inputCard
                     actionButtons

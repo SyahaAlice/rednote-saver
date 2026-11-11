@@ -7,51 +7,52 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B10000000000000000000028 /* AlbumLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* AlbumLibrary.swift */; };
-		B10000000000000000000029 /* AlbumsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* AlbumsView.swift */; };
-		B1000000000000000000002A /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* App.swift */; };
-		B1000000000000000000002B /* BackgroundRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* BackgroundRun.swift */; };
-		B1000000000000000000002C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* ContentView.swift */; };
-		B1000000000000000000002D /* CookiePool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* CookiePool.swift */; };
-		B1000000000000000000002E /* Douyin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* Douyin.swift */; };
-		B1000000000000000000002F /* Downloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000008 /* Downloader.swift */; };
-		B10000000000000000000030 /* Extractors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000009 /* Extractors.swift */; };
-		B10000000000000000000031 /* Instagram.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000A /* Instagram.swift */; };
-		B10000000000000000000032 /* Kuaishou.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000B /* Kuaishou.swift */; };
-		B10000000000000000000033 /* LivePhotoMaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000C /* LivePhotoMaker.swift */; };
-		B10000000000000000000034 /* LiveTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000D /* LiveTools.swift */; };
-		B10000000000000000000035 /* LiveToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000E /* LiveToolsView.swift */; };
-		B10000000000000000000036 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000F /* Models.swift */; };
-		B10000000000000000000037 /* NoteParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* NoteParser.swift */; };
-		B10000000000000000000038 /* PhotoSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* PhotoSaver.swift */; };
-		B10000000000000000000039 /* PreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* PreviewView.swift */; };
-		B1000000000000000000003A /* PythonBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* PythonBridge.m */; };
-		B1000000000000000000003B /* SaveNoteIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SaveNoteIntent.swift */; };
-		B1000000000000000000003C /* SaveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* SaveService.swift */; };
-		B1000000000000000000003D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* SettingsView.swift */; };
-		B1000000000000000000003E /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* Theme.swift */; };
-		B1000000000000000000003F /* WebAccounts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* WebAccounts.swift */; };
-		B10000000000000000000040 /* WebCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* WebCapture.swift */; };
-		B10000000000000000000041 /* WebViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001A /* WebViews.swift */; };
-		B10000000000000000000042 /* Weibo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001B /* Weibo.swift */; };
-		B10000000000000000000043 /* XPost.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001C /* XPost.swift */; };
-		B10000000000000000000044 /* YtDlp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001D /* YtDlp.swift */; };
-		B10000000000000000000045 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000027 /* InfoPlist.strings */; };
-		B10000000000000000000046 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000020 /* Assets.xcassets */; };
-		B10000000000000000000047 /* app in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* app */; };
-		B10000000000000000000048 /* app_packages in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000025 /* app_packages */; };
-		B10000000000000000000049 /* Python.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000023 /* Python.xcframework */; };
-		B1000000000000000000004A /* Python.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000023 /* Python.xcframework */; settings = { ATTRIBUTES = ( CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B10000000000000000000029 /* AlbumLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* AlbumLibrary.swift */; };
+		B1000000000000000000002A /* AlbumsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* AlbumsView.swift */; };
+		B1000000000000000000002B /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* App.swift */; };
+		B1000000000000000000002C /* BackgroundRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* BackgroundRun.swift */; };
+		B1000000000000000000002D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* ContentView.swift */; };
+		B1000000000000000000002E /* CookiePool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* CookiePool.swift */; };
+		B1000000000000000000002F /* Douyin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* Douyin.swift */; };
+		B10000000000000000000030 /* Downloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000008 /* Downloader.swift */; };
+		B10000000000000000000031 /* Extractors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000009 /* Extractors.swift */; };
+		B10000000000000000000032 /* Instagram.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000A /* Instagram.swift */; };
+		B10000000000000000000033 /* Kuaishou.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000B /* Kuaishou.swift */; };
+		B10000000000000000000034 /* LivePhotoMaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000C /* LivePhotoMaker.swift */; };
+		B10000000000000000000035 /* LiveTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000D /* LiveTools.swift */; };
+		B10000000000000000000036 /* LiveToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000E /* LiveToolsView.swift */; };
+		B10000000000000000000037 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000F /* Models.swift */; };
+		B10000000000000000000038 /* NoteParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* NoteParser.swift */; };
+		B10000000000000000000039 /* PhotoSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* PhotoSaver.swift */; };
+		B1000000000000000000003A /* PreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* PreviewView.swift */; };
+		B1000000000000000000003B /* PythonBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* PythonBridge.m */; };
+		B1000000000000000000003C /* SaveNoteIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SaveNoteIntent.swift */; };
+		B1000000000000000000003D /* SaveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* SaveService.swift */; };
+		B1000000000000000000003E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* SettingsView.swift */; };
+		B1000000000000000000003F /* StatusAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* StatusAnimation.swift */; };
+		B10000000000000000000040 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* Theme.swift */; };
+		B10000000000000000000041 /* WebAccounts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* WebAccounts.swift */; };
+		B10000000000000000000042 /* WebCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001A /* WebCapture.swift */; };
+		B10000000000000000000043 /* WebViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001B /* WebViews.swift */; };
+		B10000000000000000000044 /* Weibo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001C /* Weibo.swift */; };
+		B10000000000000000000045 /* XPost.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001D /* XPost.swift */; };
+		B10000000000000000000046 /* YtDlp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001E /* YtDlp.swift */; };
+		B10000000000000000000047 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000028 /* InfoPlist.strings */; };
+		B10000000000000000000048 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000021 /* Assets.xcassets */; };
+		B10000000000000000000049 /* app in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000025 /* app */; };
+		B1000000000000000000004A /* app_packages in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000026 /* app_packages */; };
+		B1000000000000000000004B /* Python.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* Python.xcframework */; };
+		B1000000000000000000004C /* Python.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* Python.xcframework */; settings = { ATTRIBUTES = ( CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		E10000000000000000000052 /* Embed Frameworks */ = {
+		E10000000000000000000054 /* Embed Frameworks */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				B1000000000000000000004A /* Python.xcframework in Embed Frameworks */,
+				B1000000000000000000004C /* Python.xcframework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -81,48 +82,49 @@
 		A10000000000000000000014 /* SaveNoteIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveNoteIntent.swift; sourceTree = "<group>"; };
 		A10000000000000000000015 /* SaveService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveService.swift; sourceTree = "<group>"; };
 		A10000000000000000000016 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		A10000000000000000000017 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
-		A10000000000000000000018 /* WebAccounts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAccounts.swift; sourceTree = "<group>"; };
-		A10000000000000000000019 /* WebCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebCapture.swift; sourceTree = "<group>"; };
-		A1000000000000000000001A /* WebViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViews.swift; sourceTree = "<group>"; };
-		A1000000000000000000001B /* Weibo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Weibo.swift; sourceTree = "<group>"; };
-		A1000000000000000000001C /* XPost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XPost.swift; sourceTree = "<group>"; };
-		A1000000000000000000001D /* YtDlp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YtDlp.swift; sourceTree = "<group>"; };
-		A1000000000000000000001E /* PythonBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PythonBridge.h; sourceTree = "<group>"; };
-		A1000000000000000000001F /* XHSSaver-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = XHSSaver-Bridging-Header.h; sourceTree = "<group>"; };
-		A10000000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		A10000000000000000000021 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A10000000000000000000022 /* XHSSaver.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = XHSSaver.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A10000000000000000000023 /* Python.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = Python.xcframework; sourceTree = "<group>"; };
-		A10000000000000000000024 /* app */ = {isa = PBXFileReference; lastKnownFileType = folder; path = app; sourceTree = "<group>"; };
-		A10000000000000000000025 /* app_packages */ = {isa = PBXFileReference; lastKnownFileType = folder; path = app_packages; sourceTree = "<group>"; };
-		A10000000000000000000026 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh-Hans; path = zh-Hans.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		A10000000000000000000017 /* StatusAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusAnimation.swift; sourceTree = "<group>"; };
+		A10000000000000000000018 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		A10000000000000000000019 /* WebAccounts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAccounts.swift; sourceTree = "<group>"; };
+		A1000000000000000000001A /* WebCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebCapture.swift; sourceTree = "<group>"; };
+		A1000000000000000000001B /* WebViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViews.swift; sourceTree = "<group>"; };
+		A1000000000000000000001C /* Weibo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Weibo.swift; sourceTree = "<group>"; };
+		A1000000000000000000001D /* XPost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XPost.swift; sourceTree = "<group>"; };
+		A1000000000000000000001E /* YtDlp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YtDlp.swift; sourceTree = "<group>"; };
+		A1000000000000000000001F /* PythonBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PythonBridge.h; sourceTree = "<group>"; };
+		A10000000000000000000020 /* XHSSaver-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = XHSSaver-Bridging-Header.h; sourceTree = "<group>"; };
+		A10000000000000000000021 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A10000000000000000000022 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10000000000000000000023 /* XHSSaver.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = XHSSaver.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000024 /* Python.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = Python.xcframework; sourceTree = "<group>"; };
+		A10000000000000000000025 /* app */ = {isa = PBXFileReference; lastKnownFileType = folder; path = app; sourceTree = "<group>"; };
+		A10000000000000000000026 /* app_packages */ = {isa = PBXFileReference; lastKnownFileType = folder; path = app_packages; sourceTree = "<group>"; };
+		A10000000000000000000027 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh-Hans; path = zh-Hans.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		E1000000000000000000004F /* Frameworks */ = {
+		E10000000000000000000051 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B10000000000000000000049 /* Python.xcframework in Frameworks */,
+				B1000000000000000000004B /* Python.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		C1000000000000000000004B = {
+		C1000000000000000000004D = {
 			isa = PBXGroup;
 			children = (
-				C1000000000000000000004C /* XHSSaver */,
-				A10000000000000000000024 /* app */,
-				A10000000000000000000025 /* app_packages */,
-				A10000000000000000000023 /* Python.xcframework */,
-				C1000000000000000000004D /* Products */,
+				C1000000000000000000004E /* XHSSaver */,
+				A10000000000000000000025 /* app */,
+				A10000000000000000000026 /* app_packages */,
+				A10000000000000000000024 /* Python.xcframework */,
+				C1000000000000000000004F /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		C1000000000000000000004C /* XHSSaver */ = {
+		C1000000000000000000004E /* XHSSaver */ = {
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000001 /* AlbumLibrary.swift */,
@@ -147,26 +149,27 @@
 				A10000000000000000000014 /* SaveNoteIntent.swift */,
 				A10000000000000000000015 /* SaveService.swift */,
 				A10000000000000000000016 /* SettingsView.swift */,
-				A10000000000000000000017 /* Theme.swift */,
-				A10000000000000000000018 /* WebAccounts.swift */,
-				A10000000000000000000019 /* WebCapture.swift */,
-				A1000000000000000000001A /* WebViews.swift */,
-				A1000000000000000000001B /* Weibo.swift */,
-				A1000000000000000000001C /* XPost.swift */,
-				A1000000000000000000001D /* YtDlp.swift */,
-				A1000000000000000000001E /* PythonBridge.h */,
-				A1000000000000000000001F /* XHSSaver-Bridging-Header.h */,
-				A10000000000000000000021 /* Info.plist */,
-				A10000000000000000000020 /* Assets.xcassets */,
-				C10000000000000000000027 /* InfoPlist.strings */,
+				A10000000000000000000017 /* StatusAnimation.swift */,
+				A10000000000000000000018 /* Theme.swift */,
+				A10000000000000000000019 /* WebAccounts.swift */,
+				A1000000000000000000001A /* WebCapture.swift */,
+				A1000000000000000000001B /* WebViews.swift */,
+				A1000000000000000000001C /* Weibo.swift */,
+				A1000000000000000000001D /* XPost.swift */,
+				A1000000000000000000001E /* YtDlp.swift */,
+				A1000000000000000000001F /* PythonBridge.h */,
+				A10000000000000000000020 /* XHSSaver-Bridging-Header.h */,
+				A10000000000000000000022 /* Info.plist */,
+				A10000000000000000000021 /* Assets.xcassets */,
+				C10000000000000000000028 /* InfoPlist.strings */,
 			);
 			path = XHSSaver;
 			sourceTree = "<group>";
 		};
-		C1000000000000000000004D /* Products */ = {
+		C1000000000000000000004F /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A10000000000000000000022 /* XHSSaver.app */,
+				A10000000000000000000023 /* XHSSaver.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -174,15 +177,15 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		D10000000000000000000053 /* XHSSaver */ = {
+		D10000000000000000000055 /* XHSSaver */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 910000000000000000000056 /* Build configuration list for PBXNativeTarget "XHSSaver" */;
+			buildConfigurationList = 910000000000000000000058 /* Build configuration list for PBXNativeTarget "XHSSaver" */;
 			buildPhases = (
-				E1000000000000000000004E /* Sources */,
-				E1000000000000000000004F /* Frameworks */,
-				E10000000000000000000050 /* Resources */,
-				E10000000000000000000051 /* Install Python */,
-				E10000000000000000000052 /* Embed Frameworks */,
+				E10000000000000000000050 /* Sources */,
+				E10000000000000000000051 /* Frameworks */,
+				E10000000000000000000052 /* Resources */,
+				E10000000000000000000053 /* Install Python */,
+				E10000000000000000000054 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -190,25 +193,25 @@
 			);
 			name = XHSSaver;
 			productName = XHSSaver;
-			productReference = A10000000000000000000022 /* XHSSaver.app */;
+			productReference = A10000000000000000000023 /* XHSSaver.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		F10000000000000000000054 /* Project object */ = {
+		F10000000000000000000056 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					D10000000000000000000053 = {
+					D10000000000000000000055 = {
 						CreatedOnToolsVersion = 16.0;
 					};
 				};
 			};
-			buildConfigurationList = 910000000000000000000055 /* Build configuration list for PBXProject "XHSSaver" */;
+			buildConfigurationList = 910000000000000000000057 /* Build configuration list for PBXProject "XHSSaver" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
@@ -217,32 +220,32 @@
 				Base,
 				"zh-Hans",
 			);
-			mainGroup = C1000000000000000000004B;
-			productRefGroup = C1000000000000000000004D /* Products */;
+			mainGroup = C1000000000000000000004D;
+			productRefGroup = C1000000000000000000004F /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				D10000000000000000000053 /* XHSSaver */,
+				D10000000000000000000055 /* XHSSaver */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		E10000000000000000000050 /* Resources */ = {
+		E10000000000000000000052 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B10000000000000000000045 /* InfoPlist.strings in Resources */,
-				B10000000000000000000046 /* Assets.xcassets in Resources */,
-				B10000000000000000000047 /* app in Resources */,
-				B10000000000000000000048 /* app_packages in Resources */,
+				B10000000000000000000047 /* InfoPlist.strings in Resources */,
+				B10000000000000000000048 /* Assets.xcassets in Resources */,
+				B10000000000000000000049 /* app in Resources */,
+				B1000000000000000000004A /* app_packages in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		E10000000000000000000051 /* Install Python */ = {
+		E10000000000000000000053 /* Install Python */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -264,49 +267,50 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		E1000000000000000000004E /* Sources */ = {
+		E10000000000000000000050 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B10000000000000000000028 /* AlbumLibrary.swift in Sources */,
-				B10000000000000000000029 /* AlbumsView.swift in Sources */,
-				B1000000000000000000002A /* App.swift in Sources */,
-				B1000000000000000000002B /* BackgroundRun.swift in Sources */,
-				B1000000000000000000002C /* ContentView.swift in Sources */,
-				B1000000000000000000002D /* CookiePool.swift in Sources */,
-				B1000000000000000000002E /* Douyin.swift in Sources */,
-				B1000000000000000000002F /* Downloader.swift in Sources */,
-				B10000000000000000000030 /* Extractors.swift in Sources */,
-				B10000000000000000000031 /* Instagram.swift in Sources */,
-				B10000000000000000000032 /* Kuaishou.swift in Sources */,
-				B10000000000000000000033 /* LivePhotoMaker.swift in Sources */,
-				B10000000000000000000034 /* LiveTools.swift in Sources */,
-				B10000000000000000000035 /* LiveToolsView.swift in Sources */,
-				B10000000000000000000036 /* Models.swift in Sources */,
-				B10000000000000000000037 /* NoteParser.swift in Sources */,
-				B10000000000000000000038 /* PhotoSaver.swift in Sources */,
-				B10000000000000000000039 /* PreviewView.swift in Sources */,
-				B1000000000000000000003A /* PythonBridge.m in Sources */,
-				B1000000000000000000003B /* SaveNoteIntent.swift in Sources */,
-				B1000000000000000000003C /* SaveService.swift in Sources */,
-				B1000000000000000000003D /* SettingsView.swift in Sources */,
-				B1000000000000000000003E /* Theme.swift in Sources */,
-				B1000000000000000000003F /* WebAccounts.swift in Sources */,
-				B10000000000000000000040 /* WebCapture.swift in Sources */,
-				B10000000000000000000041 /* WebViews.swift in Sources */,
-				B10000000000000000000042 /* Weibo.swift in Sources */,
-				B10000000000000000000043 /* XPost.swift in Sources */,
-				B10000000000000000000044 /* YtDlp.swift in Sources */,
+				B10000000000000000000029 /* AlbumLibrary.swift in Sources */,
+				B1000000000000000000002A /* AlbumsView.swift in Sources */,
+				B1000000000000000000002B /* App.swift in Sources */,
+				B1000000000000000000002C /* BackgroundRun.swift in Sources */,
+				B1000000000000000000002D /* ContentView.swift in Sources */,
+				B1000000000000000000002E /* CookiePool.swift in Sources */,
+				B1000000000000000000002F /* Douyin.swift in Sources */,
+				B10000000000000000000030 /* Downloader.swift in Sources */,
+				B10000000000000000000031 /* Extractors.swift in Sources */,
+				B10000000000000000000032 /* Instagram.swift in Sources */,
+				B10000000000000000000033 /* Kuaishou.swift in Sources */,
+				B10000000000000000000034 /* LivePhotoMaker.swift in Sources */,
+				B10000000000000000000035 /* LiveTools.swift in Sources */,
+				B10000000000000000000036 /* LiveToolsView.swift in Sources */,
+				B10000000000000000000037 /* Models.swift in Sources */,
+				B10000000000000000000038 /* NoteParser.swift in Sources */,
+				B10000000000000000000039 /* PhotoSaver.swift in Sources */,
+				B1000000000000000000003A /* PreviewView.swift in Sources */,
+				B1000000000000000000003B /* PythonBridge.m in Sources */,
+				B1000000000000000000003C /* SaveNoteIntent.swift in Sources */,
+				B1000000000000000000003D /* SaveService.swift in Sources */,
+				B1000000000000000000003E /* SettingsView.swift in Sources */,
+				B1000000000000000000003F /* StatusAnimation.swift in Sources */,
+				B10000000000000000000040 /* Theme.swift in Sources */,
+				B10000000000000000000041 /* WebAccounts.swift in Sources */,
+				B10000000000000000000042 /* WebCapture.swift in Sources */,
+				B10000000000000000000043 /* WebViews.swift in Sources */,
+				B10000000000000000000044 /* Weibo.swift in Sources */,
+				B10000000000000000000045 /* XPost.swift in Sources */,
+				B10000000000000000000046 /* YtDlp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXVariantGroup section */
-		C10000000000000000000027 /* InfoPlist.strings */ = {
+		C10000000000000000000028 /* InfoPlist.strings */ = {
 			isa = PBXVariantGroup;
 			children = (
-				A10000000000000000000026 /* zh-Hans */,
+				A10000000000000000000027 /* zh-Hans */,
 			);
 			name = InfoPlist.strings;
 			sourceTree = "<group>";
@@ -314,7 +318,7 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
-		810000000000000000000057 /* Debug */ = {
+		810000000000000000000059 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -333,7 +337,7 @@
 			};
 			name = Debug;
 		};
-		810000000000000000000058 /* Release */ = {
+		81000000000000000000005A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -351,7 +355,7 @@
 			};
 			name = Release;
 		};
-		810000000000000000000059 /* Debug */ = {
+		81000000000000000000005B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -379,7 +383,7 @@
 			};
 			name = Debug;
 		};
-		81000000000000000000005A /* Release */ = {
+		81000000000000000000005C /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -410,16 +414,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		910000000000000000000055 /* Build configuration list for PBXProject "XHSSaver" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				810000000000000000000057 /* Debug */,
-				810000000000000000000058 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		910000000000000000000056 /* Build configuration list for PBXNativeTarget "XHSSaver" */ = {
+		910000000000000000000057 /* Build configuration list for PBXProject "XHSSaver" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				810000000000000000000059 /* Debug */,
@@ -428,8 +423,17 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		910000000000000000000058 /* Build configuration list for PBXNativeTarget "XHSSaver" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81000000000000000000005B /* Debug */,
+				81000000000000000000005C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 	};
-	rootObject = F10000000000000000000054 /* Project object */;
+	rootObject = F10000000000000000000056 /* Project object */;
 }
