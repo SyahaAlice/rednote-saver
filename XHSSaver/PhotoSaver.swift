@@ -267,7 +267,7 @@ enum Albums {
         return found.sorted { $0.level.rawValue < $1.level.rawValue }
     }
 
-    /// 用户自己输入文字搜相册名（不分大小写）
+    /// 用户自己输入文字搜相册名（比较规则见 title(_:matches:)，和「相册」页是同一套）
     static func search(_ text: String) -> [Match] {
         let q = text.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
@@ -275,7 +275,7 @@ enum Albums {
         var found: [Match] = []
         all.enumerateObjects { c, _, _ in
             let t = c.localizedTitle ?? ""
-            if t.localizedCaseInsensitiveContains(q) { found.append(Match(album: c, title: t, level: .manual)) }
+            if title(t, matches: q) { found.append(Match(album: c, title: t, level: .manual)) }
         }
         return found
     }

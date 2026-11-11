@@ -143,9 +143,11 @@ final class SaveService: ObservableObject {
     @Published var albumRequest: AlbumRequest?
     /// 预览：解析完、下载之前，让用户看一眼有什么、勾选要保存的项
     @Published var previewRequest: PreviewRequest?
-    /// 当前在哪一页（0 下载、1 实况工具、2 设置）
+    /// 当前在哪一页（0 下载、1 相册、2 实况工具、3 设置）
     @Published var selectedTab = 0
-    static let settingsTab = 2
+    static let settingsTab = 3
+    /// 这次保存放进了哪个相册（没放相册是 nil）。下载页的「查看相册」用
+    @Published private(set) var savedAlbum: PHAssetCollection?
     /// 请设置页打开这个网址所属网站的登录页（登录、cookie 相关的界面都在设置里）
     @Published var loginRequest: URL?
     /// 抖音读取作品时弹出的内置浏览器
@@ -334,6 +336,7 @@ final class SaveService: ObservableObject {
         log = []
         details = []
         links = []
+        savedAlbum = nil
         latest = ""
         useFallbackForAll = false
         // 保存期间不自动锁屏；切到别的 App 时先向系统多要一点时间（真正的后台继续在开始下载时申请）
@@ -489,6 +492,7 @@ final class SaveService: ObservableObject {
         } else if mode == .quick {
             target.album = quickAlbum(for: note)
         }
+        savedAlbum = target.album
         try checkCancelled()
 
         // 从这里开始才是真正的下载：申请后台继续（iOS 26 起），切到别的 App 或锁屏也接着下

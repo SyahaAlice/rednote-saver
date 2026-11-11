@@ -1,3 +1,4 @@
+import Photos
 import SwiftUI
 import WebKit
 
@@ -8,7 +9,7 @@ private func hiddenWeb(_ webView: WKWebView) -> some View {
         .accessibilityHidden(true)
 }
 
-/// 根界面：下载 / 实况工具 / 设置。替代版本的确认弹窗挂在最外层，任何页面都能弹出
+/// 根界面：下载 / 相册 / 实况工具 / 设置。提问（底部弹出）挂在最外层，任何页面都能弹出
 struct ContentView: View {
     @ObservedObject private var service = SaveService.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -18,17 +19,21 @@ struct ContentView: View {
             DownloadView()
                 .tabItem { Label("下载", systemImage: "arrow.down.circle") }
                 .tag(0)
+            AlbumsView()
+                .tabItem { Label("相册", systemImage: "rectangle.stack") }
+                .tag(1)
             LiveToolsView()
                 .tabItem { Label("实况工具", systemImage: "livephoto") }
-                .tag(1)
+                .tag(2)
             SettingsView()
                 .tabItem { Label("设置", systemImage: "gearshape") }
                 .tag(SaveService.settingsTab)
         }
-        .alert(service.prompt?.title ?? "", isPresented: Binding(
+        // 提问从底部弹出（不用屏幕中间的弹窗）：按钮在拇指够得到的地方
+        .confirmationDialog(service.prompt?.title ?? "", isPresented: Binding(
             get: { service.prompt != nil },
             set: { if !$0, service.prompt != nil { service.answer(nil) } }
-        ), presenting: service.prompt) { p in
+        ), titleVisibility: .visible, presenting: service.prompt) { p in
             ForEach(Array(p.options.enumerated()), id: \.offset) { i, label in
                 Button(label) { service.answer(i) }
             }
@@ -70,6 +75,7 @@ struct DownloadView: View {
     @ObservedObject private var web = WebAccounts.shared
     @State private var text = ""
     @State private var showDetails = false
+    @State private var showAlbum = false
     @FocusState private var editing: Bool
 
     private var empty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -79,6 +85,8 @@ struct DownloadView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     header
+                    // 输入框和按钮往下放一段，落在屏幕中间，单手够得到
+                    Color.clear.frame(height: 84)
                     if !web.offline.isEmpty { offlineCard }
                     inputCard
                     actionButtons
@@ -95,6 +103,11 @@ struct DownloadView: View {
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .animation(.easeInOut(duration: 0.2), value: service.log.count)
+            .sheet(isPresented: $showAlbum) {
+                if let album = service.savedAlbum {
+                    NavigationStack { AlbumDetailView(album: album, showsDone: true) }
+                }
+            }
         }
     }
 
@@ -283,6 +296,15 @@ struct DownloadView: View {
             if let last = service.log.last {
                 LogRow(line: brief(last), latest: true)
             }
+            if service.phase == .finished, service.savedAlbum != nil {
+                Button {
+                    showAlbum = true
+                } label: {
+                    Label("查看相册", systemImage: "rectangle.stack")
+                }
+                .buttonStyle(ChipButtonStyle())
+                .accessibilityIdentifier("view-album")
+            }
             if service.isRunning, !service.latest.isEmpty, service.latest != service.log.last,
                !service.latest.hasPrefix("下载中") {
                 // 现在在干什么：只占一行，不断被最新的一条替换（下载进度已经在上面的步骤里了）
@@ -376,12 +398,10 @@ private struct LogRow: View {
     }
 }
 
-/// 解析完后选相册。这一页从上到下只回答一个问题：放哪。
-/// 1. 这次的作者（一行摘要；要改、要加小号再点开）
-/// 2. 放进已有相册：自动找到的按可靠程度列出（完全匹配的默认选中），也可以自己输入文字搜
-/// 3. 或者新建相册 / 不放入相册
-/// 底下一个主按钮，文字跟着当前的选择变。
-/// 放进已有相册时直接放入、不问改名；要把这次的账号写进相册名，走「给这个相册改名」
+/// 解析完后选相册。这一页只回答一个问题：放哪。
+/// 上面一行是这次的作者（要改、要加小号点「改作者」）；中间是已有相册（自动找到的按可靠程度列出，
+/// 完全匹配的默认选中；底部搜索框里输入文字就换成搜索结果）、新建相册、不放入相册；
+/// 底部是搜索框和按钮：主按钮直接放入、不问改名，旁边的「改名…」是单独的入口
 struct AlbumChoiceView: View {
     let request: AlbumRequest
     @ObservedObject private var service = SaveService.shared
@@ -401,7 +421,9 @@ struct AlbumChoiceView: View {
     @State private var found: [Albums.Match] = []
     @State private var query = ""
     @State private var choice = Choice.create
-    /// 正在给这个相册改名（从「给这个相册改名」进来的，不点不会出现）
+    /// 选中的已有相册（可能是搜出来的，清空搜索后也要留着）
+    @State private var picked: Albums.Match?
+    /// 正在给这个相册改名（从「改名…」进来的，不点不会出现）
     @State private var merging: Albums.Match?
     /// 新的相册名：先按规则生成一个，用户可以随便改
     @State private var mergedText = ""
@@ -412,30 +434,36 @@ struct AlbumChoiceView: View {
     private var generated: String { Albums.compose(style, entries) }
     /// 账号信息变了就重新查找（把会影响查找的内容拼成能比较的文字）
     private var searchKey: [String] { resolved.map { $0.platform + "|" + $0.name + "|" + $0.cleanID } }
+    private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
-    /// 列出来的相册：自动找到的在前，搜出来的在后（去掉重复的）
+    /// 列出来的相册：在搜索就是搜索结果；否则是自动找到的，加上之前搜出来选中的那个
     private var listed: [Albums.Match] {
-        matches + found.filter { f in !matches.contains { $0.album.localIdentifier == f.album.localIdentifier } }
+        if searching { return found }
+        var list = matches
+        if let p = picked, !list.contains(where: { $0.album.localIdentifier == p.album.localIdentifier }) {
+            list.append(p)
+        }
+        return list
     }
 
     private var chosen: Albums.Match? {
-        guard case .existing(let id) = choice else { return nil }
-        return listed.first { $0.album.localIdentifier == id }
+        guard case .existing = choice else { return nil }
+        return picked
     }
 
-    /// 按现在的账号重新查找；有完全匹配的就默认选它
-    private func refresh(selectBest: Bool) {
+    private func pick(_ m: Albums.Match) {
+        picked = m
+        choice = .existing(m.album.localIdentifier)
+    }
+
+    /// 按现在的账号重新查找
+    private func refresh() {
         // 第一个账号用作者的全部 ID 去找（相册名里用的可能是其中任何一个）
         var all = resolved
         if let first = all.first {
             all += Albums.entries(platform: first.platform, author: request.author)
         }
         matches = Albums.matches(entries: all)
-        if selectBest, let best = matches.first(where: { $0.level == .exact }) {
-            choice = .existing(best.album.localIdentifier)
-        } else if case .existing = choice, chosen == nil {
-            choice = .create
-        }
     }
 
     /// 某个字段没填时，显示它会沿用的值
@@ -453,25 +481,14 @@ struct AlbumChoiceView: View {
         return v.isEmpty ? label : "\(label)（不填则同上：\(v)）"
     }
 
-    /// 一个可以点选的选项：左边是单选圆点，右边可以带一个小标签
-    private func option(_ selected: Bool, _ title: String, badge: String = "", tint: Color = .secondary,
-                        action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-                Text(title).foregroundStyle(.primary)
-                Spacer(minLength: 8)
-                if !badge.isEmpty {
-                    Text(badge).font(.caption).foregroundStyle(tint)
-                }
-            }
-        }
+    private func radio(_ selected: Bool) -> some View {
+        Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
     }
 
     private var confirmTitle: String {
         switch choice {
-        case .existing: return "放入「" + String((chosen?.title ?? "").prefix(14)) + "」"
+        case .existing: return "放入「" + String((chosen?.title ?? "").prefix(10)) + "」"
         case .create: return "新建相册并放入"
         case .none: return "不放相册，直接保存"
         }
@@ -492,7 +509,7 @@ struct AlbumChoiceView: View {
         case .create:
             service.decideAlbum(.create(albumName.trimmingCharacters(in: .whitespaces)))
         case .existing:
-            // 直接放入，不问改名：改名是另一个入口（列表下面的「给这个相册改名」）
+            // 直接放入，不问改名：改名是另一个入口（旁边的「改名…」）
             guard let m = chosen else { return }
             service.decideAlbum(.existing(m.album))
         }
@@ -504,85 +521,80 @@ struct AlbumChoiceView: View {
         merging = m
     }
 
+    private var bottomBar: some View {
+        VStack(spacing: 10) {
+            BottomSearchField(placeholder: "搜索全部相册", text: $query)
+                .accessibilityIdentifier("album-search")
+            HStack(spacing: 10) {
+                Button("改名…") {
+                    if let m = chosen { startRename(m) }
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .frame(width: 96)
+                .disabled(chosen == nil)
+                .accessibilityIdentifier("album-rename")
+                Button(confirmTitle) { confirm() }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(!canConfirm)
+                    .accessibilityIdentifier("album-confirm")
+            }
+        }
+        .disabled(working)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
-                    if let first = resolved.first {
+                    HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(first.platform + " · " + first.name)
-                            Text(request.author.idLabel + "：" + (first.cleanID.isEmpty ? "没有拿到" : first.cleanID))
-                                .font(.footnote)
-                                .foregroundStyle(first.cleanID.isEmpty ? Color.orange : Color.secondary)
-                            if resolved.count > 1 {
-                                Text("另外 \(resolved.count - 1) 个账号")
+                            if let first = resolved.first {
+                                Text(first.platform + " · " + first.name)
+                                Text(request.author.idLabel + "：" + (first.cleanID.isEmpty ? "没有拿到" : first.cleanID)
+                                     + (resolved.count > 1 ? "，另外 \(resolved.count - 1) 个账号" : ""))
                                     .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(first.cleanID.isEmpty ? Color.orange : Color.secondary)
                             }
                         }
+                        Spacer(minLength: 8)
+                        Button("改作者") { editAuthor = true }
+                            .buttonStyle(ChipButtonStyle())
                     }
-                    DisclosureGroup("修改，或添加这个作者的其它账号", isExpanded: $editAuthor) {
-                        ForEach($entries, id: \.uid) { $e in
-                            let i = entries.firstIndex { $0.uid == e.uid } ?? 0
-                            HStack {
-                                Text("账号 \(i + 1)").font(.footnote).foregroundStyle(.secondary)
-                                Spacer()
-                                if i > 0 {
-                                    Button(role: .destructive) {
-                                        let uid = e.uid
-                                        entries.removeAll { $0.uid == uid }
-                                    } label: {
-                                        Image(systemName: "minus.circle.fill")
-                                    }
-                                    .buttonStyle(.borderless)
-                                }
-                            }
-                            TextField(placeholder("平台", i, \.platform), text: $e.platform)
-                            TextField(placeholder("用户名", i, \.name), text: $e.name)
-                            TextField(i == 0 ? request.author.idLabel : "ID", text: $e.id)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                        }
-                        Button {
-                            entries.append(Albums.Entry(platform: "", name: "", id: ""))
-                        } label: {
-                            Label("添加账号", systemImage: "plus.circle.fill")
-                        }
-                    }
-                } header: {
-                    Text("这次的作者")
                 }
 
                 Section {
                     ForEach(listed, id: \.album.localIdentifier) { m in
-                        option(choice == .existing(m.album.localIdentifier), m.title, badge: m.level.label,
-                               tint: m.level == .exact ? .green : m.level == .manual ? .secondary : .orange) {
-                            choice = .existing(m.album.localIdentifier)
+                        Button {
+                            pick(m)
+                        } label: {
+                            HStack(spacing: 10) {
+                                radio(choice == .existing(m.album.localIdentifier))
+                                AlbumMatchRow(match: m)
+                            }
                         }
+                        .foregroundStyle(.primary)
                     }
-                    if matches.isEmpty {
-                        Text("没有自动找到这个作者的相册").foregroundStyle(.secondary)
-                    }
-                    if let m = chosen {
-                        Button("给这个相册改名…") { startRename(m) }
-                            .font(.footnote)
-                            .accessibilityIdentifier("album-rename")
-                    }
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("搜索相册名", text: $query)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .accessibilityIdentifier("album-search")
+                    if listed.isEmpty {
+                        Text(searching ? "没有找到" : "没有自动找到这个作者的相册，可以在底下搜索")
+                            .foregroundStyle(.secondary)
                     }
                 } header: {
-                    Text("放进已有相册")
-                } footer: {
-                    Text("知道是同一个作者、但名字对不上的相册，可以搜出来选它。放入时不会改相册的名字；想把这次的账号写进相册名（以后能自动对上），用「给这个相册改名」。")
+                    Text(searching ? "搜索结果" : "已有相册")
                 }
 
                 Section {
-                    option(choice == .create, "新建相册") { choice = .create }
+                    Button {
+                        choice = .create
+                    } label: {
+                        HStack(spacing: 10) {
+                            radio(choice == .create)
+                            Text("新建相册")
+                        }
+                    }
+                    .foregroundStyle(.primary)
                     if choice == .create {
                         TextField("相册名", text: $albumName, axis: .vertical)
                         Picker("格式", selection: $style) {
@@ -590,35 +602,35 @@ struct AlbumChoiceView: View {
                         }
                         .pickerStyle(.segmented)
                     }
-                    option(choice == .none, "不放入相册") { choice = .none }
+                    Button {
+                        choice = .none
+                    } label: {
+                        HStack(spacing: 10) {
+                            radio(choice == .none)
+                            Text("不放入相册")
+                        }
+                    }
+                    .foregroundStyle(.primary)
                 } header: {
                     Text("或者")
                 }
             }
-            .navigationTitle("整理到相册")
+            .scrollDismissesKeyboard(.interactively)
+            .navigationTitle("放进哪个相册")
             .navigationBarTitleDisplayMode(.inline)
             .disabled(working)
-            .safeAreaInset(edge: .bottom) {
-                Button(confirmTitle) { confirm() }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(!canConfirm || working)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.bar)
-                    .accessibilityIdentifier("album-confirm")
-            }
+            .safeAreaInset(edge: .bottom) { bottomBar }
             .onAppear {
                 entries = [Albums.Entry(platform: request.platform, name: request.author.name,
                                         id: request.author.primaryID)]
                 albumName = generated
                 matches = request.matches
-                if let best = matches.first(where: { $0.level == .exact }) {
-                    choice = .existing(best.album.localIdentifier)
-                }
+                if let best = matches.first(where: { $0.level == .exact }) { pick(best) }
             }
             .onChange(of: generated) { albumName = $0 }
-            .onChange(of: searchKey) { _ in refresh(selectBest: false) }
+            .onChange(of: searchKey) { _ in refresh() }
             .onChange(of: query) { found = Albums.search($0) }
+            .sheet(isPresented: $editAuthor) { authorSheet }
             .sheet(isPresented: Binding(get: { merging != nil }, set: { if !$0 { merging = nil } })) {
                 if let m = merging { mergeSheet(m) }
             }
@@ -626,47 +638,101 @@ struct AlbumChoiceView: View {
         .interactiveDismissDisabled()
     }
 
-    /// 给相册改名（顺便把这次的账号写进去）：规则只负责给一个初稿，名字最后由用户自己定
-    /// （昵称的变体太多：加表情、加符号、前后加说明文字，规则判断不了哪些该留）
-    private func mergeSheet(_ m: Albums.Match) -> some View {
-        let name = mergedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return NavigationStack {
+    /// 改这次的作者信息，或添加这个作者的其它账号（小号、别的平台）
+    private var authorSheet: some View {
+        NavigationStack {
             Form {
-                Section {
-                    Text(m.title)
-                } header: {
-                    Text("相册现在的名字")
-                }
-                Section {
-                    TextField("相册名", text: $mergedText, axis: .vertical)
-                        .accessibilityIdentifier("album-merge-name")
-                    Button("恢复成现在的名字") { mergedText = m.title }
-                        .font(.footnote)
-                } header: {
-                    Text("改成")
-                } footer: {
-                    Text("可以随便改。名字里留着这次账号的「前缀 + ID」，以后这个账号就能自动对上这个相册。")
-                }
-                Section {
-                    Button("改名并放入") {
-                        working = true
-                        Task {
-                            try? await Albums.rename(m.album, to: name)
-                            service.decideAlbum(.existing(m.album))
+                ForEach($entries, id: \.uid) { $e in
+                    let i = entries.firstIndex { $0.uid == e.uid } ?? 0
+                    Section {
+                        TextField(placeholder("平台", i, \.platform), text: $e.platform)
+                        TextField(placeholder("用户名", i, \.name), text: $e.name)
+                        TextField(i == 0 ? request.author.idLabel : "ID", text: $e.id)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        if i > 0 {
+                            Button("删除这个账号", role: .destructive) {
+                                let uid = e.uid
+                                entries.removeAll { $0.uid == uid }
+                            }
                         }
+                    } header: {
+                        Text("账号 \(i + 1)")
                     }
-                    .disabled(name.isEmpty || name == m.title || working)
-                    .accessibilityIdentifier("album-merge-confirm")
+                }
+                Section {
+                    Button {
+                        entries.append(Albums.Entry(platform: "", name: "", id: ""))
+                    } label: {
+                        Label("添加账号", systemImage: "plus.circle.fill")
+                    }
                 }
             }
-            .navigationTitle("给相册改名")
+            .navigationTitle("这次的作者")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { merging = nil }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { editAuthor = false }
                 }
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// 给相册改名（顺便把这次的账号写进去）：规则只负责给一个初稿，名字最后由用户自己定
+    /// （昵称的变体太多：加表情、加符号、前后加说明文字，规则判断不了哪些该留）
+    private func mergeSheet(_ m: Albums.Match) -> some View {
+        let name = mergedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("给相册改名").font(.headline)
+                Spacer()
+                Button("取消") { merging = nil }
+            }
+            Text("现在的名字：" + m.title)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            TextField("相册名", text: $mergedText, axis: .vertical)
+                .padding(12)
+                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .accessibilityIdentifier("album-merge-name")
+            Text("可以随便改。名字里留着这次账号的「前缀 + ID」，以后这个账号就能自动对上这个相册。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button("改名并放入") {
+                working = true
+                Task {
+                    try? await Albums.rename(m.album, to: name)
+                    service.decideAlbum(.existing(m.album))
+                }
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .disabled(name.isEmpty || name == m.title || working)
+            .accessibilityIdentifier("album-merge-confirm")
+        }
+        .padding(20)
+        .presentationDetents([.medium, .large])
+    }
+}
+
+/// 选相册页里的一行：封面、名字、数量，右边是匹配程度
+private struct AlbumMatchRow: View {
+    let match: Albums.Match
+    @State private var count: Int?
+    @State private var cover: PHAsset?
+
+    var body: some View {
+        AlbumRow(title: match.title, count: count, cover: cover) {
+            Text(match.level.label)
+                .font(.caption)
+                .foregroundStyle(match.level == .exact ? Color.green
+                                 : match.level == .manual ? Color.secondary : Color.orange)
+        }
+        .task(id: match.album.localIdentifier) {
+            let assets = PHAsset.fetchAssets(in: match.album, options: nil)
+            count = assets.count
+            cover = assets.lastObject
+        }
     }
 }
