@@ -22,6 +22,12 @@ struct XHSError: LocalizedError {
     static let cancelled = XHSError("已取消", kind: .cancelled)
 }
 
+/// 预览页里视频清晰度的一档。height 是交回来的代号：0 = 首选（最高 / 原片），其它是画面高度
+struct VideoQuality: Hashable {
+    var height: Int
+    var label: String
+}
+
 /// 作品里的一个媒体项
 struct NoteMedia {
     enum Kind { case image, live, video }
@@ -30,6 +36,8 @@ struct NoteMedia {
     var original: [URL]
     /// 首选失败时的替代地址，使用前要先征得用户同意
     var fallback: [URL]
+    /// 较低清晰度的地址（画面高度 → 地址）：用户在预览页选了那一档才用。只有解析时就拿到多档地址的视频有（小红书）
+    var byHeight: [Int: [URL]] = [:]
     /// 实况图的动态视频地址（只有 kind == .live 时有）
     var liveVideoURLs: [URL] = []
     /// 已经下载好的本地文件（yt-dlp 下载的内容走这里，不再联网）
@@ -38,6 +46,15 @@ struct NoteMedia {
     var preview: URL?
     /// 这一项在解析 / 下载阶段就已经失败（yt-dlp 多项帖子里的某一项）：保存时直接算作失败并显示这句说明
     var error: String?
+
+    /// 用户选了某一档清晰度之后的样子：有那一档的地址就只用它（不再有替代版本），没有就不变
+    func at(height: Int) -> NoteMedia {
+        guard height > 0, let urls = byHeight[height], !urls.isEmpty else { return self }
+        var item = self
+        item.original = urls
+        item.fallback = []
+        return item
+    }
 
     /// 这一项的下载直链（首选地址；实况图再加上它的动态视频）。还没解析出地址的项（yt-dlp 的占位）为空
     var directLinks: [URL] {
@@ -89,13 +106,23 @@ struct ParsedNote {
     var heights: [Int] = []
     /// yt-dlp 的作品：每种清晰度下每一项的下载直链（0 = 最高清晰度）
     var linksByHeight: [Int: [[URL]]] = [:]
+    /// 解析时就拿到多档地址的作品（小红书）：预览页里列的清晰度，第一项是首选。空 = 按 heights 列
+    var qualities: [VideoQuality] = []
+
+    /// 预览页里可选的视频清晰度；少于两档就不用选
+    var qualityOptions: [VideoQuality] {
+        if !qualities.isEmpty { return qualities }
+        guard heights.count > 1 else { return [] }
+        return [VideoQuality(height: 0, label: "最高（\(heights[0])p）")]
+            + heights.dropFirst().map { VideoQuality(height: $0, label: "\($0)p") }
+    }
 
     /// 下载直链：selection 是选中的项（nil = 全部），height 是选的清晰度
     func links(selection: Set<Int>?, height: Int) -> [String] {
         let table = linksByHeight[height] ?? linksByHeight[0] ?? []
         var out: [String] = []
         for (i, item) in items.enumerated() where selection?.contains(i) ?? true {
-            let own = item.directLinks
+            let own = item.at(height: height).directLinks
             let urls = own.isEmpty && i < table.count ? table[i] : own
             out += urls.map { $0.absoluteString }
         }

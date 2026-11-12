@@ -14,8 +14,8 @@ struct PreviewRequest: Identifiable {
     let referer: String
     /// 之前保存过的话，上次保存的时间
     let savedBefore: Date?
-    /// 视频可选的清晰度（画面高度，从高到低）；少于两档就不显示选择
-    let heights: [Int]
+    /// 视频可选的清晰度（第一项是首选，代号 0）；少于两档就不显示选择
+    let qualities: [VideoQuality]
     /// 选中的项和清晰度对应的下载直链
     let links: (Set<Int>, Int) -> [String]
 }
@@ -24,7 +24,7 @@ struct PreviewRequest: Identifiable {
 struct PreviewChoice {
     /// 选中的项（items 的下标）
     var selection: Set<Int>
-    /// 视频清晰度（画面高度），0 = 最高
+    /// 视频清晰度（VideoQuality.height），0 = 首选
     var height: Int
 }
 
@@ -213,15 +213,14 @@ struct PreviewView: View {
                                 .foregroundStyle(.orange)
                         }
                     }
-                    if request.heights.count > 1 {
+                    if request.qualities.count > 1 {
                         // 一次对这个链接里的所有视频生效；默认最高
                         HStack {
                             Text("视频清晰度").font(.subheadline)
                             Spacer()
                             Picker("视频清晰度", selection: $height) {
-                                Text("最高（\(request.heights[0])p）").tag(0)
-                                ForEach(Array(request.heights.dropFirst()), id: \.self) { h in
-                                    Text("\(h)p").tag(h)
+                                ForEach(request.qualities, id: \.self) { q in
+                                    Text(q.label).tag(q.height)
                                 }
                             }
                             .pickerStyle(.menu)

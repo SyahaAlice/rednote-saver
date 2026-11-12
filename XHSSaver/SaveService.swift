@@ -241,7 +241,7 @@ final class SaveService: ObservableObject {
         let request = PreviewRequest(platform: note.platform, title: note.title, author: note.author,
                                      items: note.items, referer: note.referer,
                                      savedBefore: History.savedDate(note.historyKey),
-                                     heights: note.heights,
+                                     qualities: note.qualityOptions,
                                      links: { note.links(selection: $0, height: $1) })
         return await waiting {
             await withCheckedContinuation { (c: CheckedContinuation<PreviewChoice?, Never>) in
@@ -464,11 +464,16 @@ final class SaveService: ObservableObject {
             selection = chosen
             height = choice.height
             links = note.links(selection: chosen, height: height)
-            if height > 0 { say("视频清晰度：最高 " + String(height) + "p", detail: true) }
+            if height > 0 {
+                let label = note.qualityOptions.first { $0.height == height }?.label ?? String(height) + "p"
+                say("视频清晰度：" + label, detail: true)
+            }
             if chosen.count < note.items.count { say("选了 \(chosen.count) / \(note.items.count) 项") }
             // 还没下载的作品（yt-dlp）把选择交给 fetch，只下载选中的；其它的直接筛掉没选的
+            // 解析时就拿到多档地址的（小红书）在这里换成选的那一档
             if note.fetch == nil {
-                note.items = note.items.enumerated().filter { chosen.contains($0.offset) }.map { $0.element }
+                note.items = note.items.enumerated().filter { chosen.contains($0.offset) }
+                    .map { $0.element.at(height: height) }
             }
         }
 

@@ -53,7 +53,7 @@
 
 | 网站 | 图片 | 视频 | 实况 | 需要登录 |
 |---|---|---|---|---|
-| 小红书 | 原图（HEIC） | 原片（`originVideoKey`） | 有 | 不需要（游客优先） |
+| 小红书 | 原图（HEIC） | 原片（`originVideoKey`）；预览页里可以改选转码出来的某一档（`NoteMedia.byHeight`，按画面短边分档，同档 H.264 优先），默认和快速保存仍是原片 | 有 | 不需要（游客优先） |
 | 抖音 | 最高分辨率 JPEG（没有原图） | `bit_rate` 里面积最大、码率最高的 mp4 | 有 | 必须 |
 | Instagram | `image_versions2` 里面积最大的 | `video_versions` 里面积最大的 | 无 | 必须（否则只有 yt-dlp 的视频） |
 | X | `name=orig` 原图 | mp4 里码率最高的 | 无 | 图片必须 |

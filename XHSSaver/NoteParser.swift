@@ -167,6 +167,7 @@ enum NoteParser {
         }
         let type = note["type"] as? String ?? ""
         var items: [NoteMedia] = []
+        var qualities: [VideoQuality] = []
 
         if type == "video" {
             let video = note["video"] as? [String: Any] ?? [:]
@@ -185,6 +186,41 @@ enum NoteParser {
             }
             if original.isEmpty && fallback.isEmpty { throw XHSError("没找到视频地址") }
             var item = NoteMedia(kind: .video, original: original, fallback: fallback)
+            // 转码出来的各档，预览页里可以选（默认还是原片）。按画面短边分档；
+            // 同一档里 H.264 在前、码率高的在前。AV1 相册放不了，只有没别的编码时才列
+            var tiers: [Int: [(rank: Int, bitrate: Int, size: Int64, urls: [URL])]] = [:]
+            for s in all {
+                let w = (s["width"] as? NSNumber)?.intValue ?? 0, h = (s["height"] as? NSNumber)?.intValue ?? 0
+                guard w > 0, h > 0 else { continue }
+                var urls: [URL] = []
+                if let u = https(s["masterUrl"] as? String) { urls.append(u) }
+                for b in s["backupUrls"] as? [String] ?? [] { if let u = https(b) { urls.append(u) } }
+                guard !urls.isEmpty else { continue }
+                let codec = s["videoCodec"] as? String ?? ""
+                let rank = codec.hasPrefix("h264") ? 0 : (codec.hasPrefix("hevc") || codec.hasPrefix("h265")) ? 1 : 2
+                tiers[min(w, h), default: []].append((rank, (s["videoBitrate"] as? NSNumber)?.intValue ?? 0,
+                                                      (s["size"] as? NSNumber)?.int64Value ?? 0, urls))
+            }
+            if tiers.values.contains(where: { $0.contains { $0.rank < 2 } }) {
+                tiers = tiers.mapValues { $0.filter { $0.rank < 2 } }.filter { !$0.value.isEmpty }
+            }
+            var options: [VideoQuality] = []
+            for height in tiers.keys.sorted(by: >) {
+                let list = (tiers[height] ?? []).sorted { ($0.rank, -$0.bitrate) < ($1.rank, -$1.bitrate) }
+                item.byHeight[height] = list.flatMap { $0.urls }
+                let size = list.first?.size ?? 0
+                let sizeText = size > 0 ? "（" + ByteCountFormatter.string(fromByteCount: size, countStyle: .file) + "）" : ""
+                options.append(VideoQuality(height: height, label: "\(height)p" + sizeText))
+            }
+            if original.isEmpty {
+                // 没有原片：首选就是 fallback 里的那些，不单独列最高的一档
+                if let top = options.first {
+                    options[0] = VideoQuality(height: 0, label: "最高（\(top.height)p）")
+                }
+            } else {
+                options.insert(VideoQuality(height: 0, label: "原片"), at: 0)
+            }
+            if options.count > 1 { qualities = options }
             // 预览用视频封面（笔记的第一张图）
             item.preview = https((note["imageList"] as? [[String: Any]])?.first?["urlDefault"] as? String)
             items.append(item)
@@ -221,8 +257,10 @@ enum NoteParser {
         }
         let published = (note["time"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
         let title = (note["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? note["desc"] as? String ?? ""
-        return ParsedNote(platform: "小红书", id: noteID, title: title, items: items,
-                          author: author, published: published)
+        var parsed = ParsedNote(platform: "小红书", id: noteID, title: title, items: items,
+                                author: author, published: published)
+        parsed.qualities = qualities
+        return parsed
     }
 }
 

@@ -67,7 +67,7 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 | `phase` | 当前阶段。它的「值」是固定的英文代号：`idle`、`parsing`、`waiting-user`、`downloading`、`saving-3-of-9`、`finished`、`failed`、`cancelled` |
 | `capture-cancel`、`capture-reload` | 内置浏览器读取页（抖音、Instagram、X、微博、快手）的「取消」「重新加载」。读取平时在后台进行、不弹页面；等了约 25 秒还没读到，会先弹窗问「要不要打开页面自己处理」，选了「打开页面」这一页才出现 |
 | `login-status`、`login-reload` | 设置里登录页底部的提示和「重新加载」。`login-status` 的「值」：`logged-in`（浏览器里已有登录 cookie，可以点「完成」）、`not-logged-in`、`unknown` |
-| `preview-save`、`preview-cancel`、`preview-quality` | 预览页的「保存到相册（N 项）」「取消」和视频清晰度选择（只有多种清晰度可选时出现） |
+| `preview-save`、`preview-cancel`、`preview-quality` | 预览页的「保存到相册（N 项）」「取消」和视频清晰度选择（只有多种清晰度可选时出现；小红书视频是「原片」加转码出来的各档） |
 | `stages` | 步骤列表：走过的每一步，进行中的右边是进度（`3 / 9`、百分比） |
 | `offline-accounts` | 下载页顶上「账号已掉线」卡片里的账号名单（自动续期发现掉线时才出现） |
 | `accounts-export`、`accounts-import` | 设置页「导出全部账号」「从文件导入」（会弹出系统的文件选择） |
