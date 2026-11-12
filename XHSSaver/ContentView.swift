@@ -102,7 +102,7 @@ struct DownloadView: View {
         paste()
     }
 
-    /// 把剪贴板里的文字填进输入框（没有文字就不动）。App 自己读剪贴板，系统可能弹「允许粘贴」；
+    /// 自动粘贴用：把剪贴板里的文字填进输入框（没有文字就不动）。App 自己读剪贴板，系统可能弹「允许粘贴」；
     /// 在系统设置里把「从其他 App 粘贴」设成「允许」后就不弹了
     private func paste() {
         let board = UIPasteboard.general
@@ -153,8 +153,14 @@ struct DownloadView: View {
             .animation(.easeInOut(duration: 0.2), value: service.log.count)
             .onAppear { if seenClip == nil { pasteIfNew() } }
             .onChange(of: scenePhase) { phase in
-                // 离开时记下编号：在 App 里自己复制的东西（比如下载直链）回来时不会被填进去
-                if phase == .active { pasteIfNew() } else { seenClip = UIPasteboard.general.changeCount }
+                // 退到后台时记下编号：在 App 里自己复制的东西（比如下载直链）回来时不会被填进去。
+                // 只在 .background 记，不能在 .inactive 记：切回来时会先经过 .inactive，
+                // 那时编号已经是新的，记下来就等于「看过了」，随后到 .active 时永远不会粘贴
+                if phase == .active {
+                    pasteIfNew()
+                } else if phase == .background {
+                    seenClip = UIPasteboard.general.changeCount
+                }
             }
             .sheet(isPresented: $showAlbum) {
                 if let album = service.savedAlbum {
@@ -188,7 +194,7 @@ struct DownloadView: View {
 
     // 输入框；下面一行靠右：一个位置轮流放「粘贴」和「清空」，它右边是「自动粘贴」开关。
     // 空的时候是粘贴，有内容就变成清空，可以在同一个地方连着按。
-    // 两个按钮是同一种样式。「粘贴」是 App 自己读剪贴板（不用系统的粘贴按钮：它的样子改不了，和「清空」对不上）
+    // 「粘贴」用系统的粘贴按钮（用户试过自己画的按钮，要求退回来）
     private var inputCard: some View {
         Card {
             ZStack(alignment: .topLeading) {
@@ -208,13 +214,12 @@ struct DownloadView: View {
                 Spacer()
                 ZStack {
                     if text.isEmpty {
-                        Button {
-                            paste()
-                        } label: {
-                            Label("粘贴", systemImage: "doc.on.clipboard")
+                        PasteButton(payloadType: String.self) { strings in
+                            if let s = strings.first { text = s }
                         }
-                        .buttonStyle(ChipButtonStyle())
-                        .accessibilityIdentifier("paste")
+                        .buttonBorderShape(.capsule)
+                        .labelStyle(.titleAndIcon)
+                        .tint(.accentColor)
                     } else {
                         Button {
                             text = ""

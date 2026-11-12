@@ -61,7 +61,7 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 | `albums-search`、`albums-filter`、`albums-select`、`albums-merge` | 「相册」页底部：搜索框、筛选（全部 / 手写的名字 / 可能重复）、「多选」、多选后的「合并选中的 N 个相册」 |
 | `album-detail-rename`、`album-detail-merge`、`album-detail-select`、`album-detail-delete` | 相册内容页底部：改名、合并到…、选择照片、删除相册 |
 | `album-remove`、`album-move` | 相册内容页选了照片之后：移出相册、移到… |
-| `paste`、`clear` | 「粘贴」（把剪贴板里的文字填进输入框，系统可能先弹「允许粘贴」）和「清空」。两个按钮共用输入框下面、「自动粘贴」开关左边的一个位置：输入框空着时那里是 `paste`，有内容时是 `clear`；刚换过来的 0.6 秒内不接受点按 |
+| `clear` | 清空输入框。它和系统的「粘贴」按钮（没有标识，按文字「粘贴」找）共用输入框下面、「自动粘贴」开关左边的一个位置：输入框空着时那里是「粘贴」，有内容时是 `clear`；刚换过来的 0.6 秒内不接受点按 |
 | `links`、`links-copy` | 「下载直链」一栏（点开 / 复制全部），下载页和预览页都有 |
 | `cancel` | 保存过程中的「取消」按钮（只在保存时出现） |
 | `phase` | 当前阶段。它的「值」是固定的英文代号：`idle`、`parsing`、`waiting-user`、`downloading`、`saving-3-of-9`、`finished`、`failed`、`cancelled` |
