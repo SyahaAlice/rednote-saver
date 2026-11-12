@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// 顶部动画的「简洁」样式（默认）：整块只有三个纯色图形——一个圆、一个方块、一条胶囊，没有背景。
-/// 三个图形其实都是圆角矩形：宽、高、圆角一变，就能在圆、方块、胶囊、长条之间变形。
+/// 顶部动画的「简洁」样式（默认）：主体是三块纯色的色片，没有背景。
+/// 三块色片其实都是圆角矩形：宽、高、圆角一变，就能在圆、卡片、胶囊、长条之间变形。
+/// 空闲时它们是半透明的，每隔几秒重新组成一个构图（叠着的地方混出新的颜色），外圈有两段细弧和两个小点慢慢绕；
+/// 其它状态下它们变成圆点、进度条、对勾的底。
 /// 每个数值各带一根弹簧，到位时会过冲一点再回来；三个图形的弹簧松紧不同，所以有先有后。
 /// 另一种样式（图形多、带背景）在 StatusAnimation.swift 里的 StatusAnimationModel
 final class SimpleAnimationModel {
@@ -35,13 +37,14 @@ final class SimpleAnimationModel {
     private var ripple = 9.0
     private var finished = 0.0
     private var failed = 0.0
+    private var idle = 1.0
 
     private func enter(_ k: Kind) {
         guard k != shown else { return }
         shown = k
         since = t
         ripple = 0
-        // 转角只在图形是方块的时候用，方块转 90° 看着一样：把转过的整圈去掉，免得换状态时倒着转回去好几圈
+        // 转角只在方块滚动时会越转越大，方块转 90° 看着一样：把转过的整圈去掉，免得换状态时倒着转回去好几圈
         let quarter = Double.pi / 2
         for i in shapes.indices where !shapes[i].v.isEmpty {
             shapes[i].v[5] = shapes[i].v[5].truncatingRemainder(dividingBy: quarter)
@@ -61,15 +64,36 @@ final class SimpleAnimationModel {
 
         switch shown {
         case .idle:
-            // 排成一行依次起伏；方块隔几秒转四分之一圈，胶囊一伸一缩
-            y = cy + sin(t * 1.5 - Double(i) * 0.9) * 5
-            if i == 0 {
-                x = cx - 50; sw = 28; sh = 28; r = 14; c = pal.violet
-            } else if i == 1 {
-                x = cx; sw = 28; sh = 28; r = 8; c = pal.rose
-                rot = floor(age / 2.6) * Double.pi / 2
-            } else {
-                x = cx + 54; sw = 38 + 14 * max(0, sin(t * 1.2)); sh = 14; r = 7; c = pal.lav
+            // 四个构图轮流出现，每个 3.8 秒；色片半透明，叠着的地方混色
+            c = i == 0 ? pal.violet : (i == 1 ? pal.rose : pal.lav)
+            alpha = 0.82
+            let k = Double(i - 1)
+            switch Int(t / 3.8) % 4 {
+            case 0:
+                // 三个圆叠成一朵，整体慢慢转，一张一合
+                let a = t * 0.5 + Double(i) * 2.094
+                let rr = 15 + 4 * sin(t * 1.3)
+                x = cx + cos(a) * rr; y = cy + sin(a) * rr
+                sw = 50; sh = 50; r = 25
+            case 1:
+                // 三张卡片扇开，像一叠照片，轻轻摆
+                x = cx + k * (27 + 3 * sin(t * 1.2)); y = cy + abs(k) * 6
+                sw = 46; sh = 60; r = 11
+                rot = k * 0.26 + sin(t * 1.2) * 0.06
+            case 2:
+                // 拼贴：竖条、圆、横条
+                if i == 0 {
+                    x = cx - 42; sw = 22; sh = 74 + 8 * sin(t * 1.4); r = 11
+                } else if i == 1 {
+                    x = cx + 6; y = cy - 12 + 4 * sin(t * 1.7); sw = 44; sh = 44; r = 22
+                } else {
+                    x = cx + 14 + 6 * sin(t * 1.1); y = cy + 28; sw = 88; sh = 18; r = 9
+                }
+            default:
+                // 三根柱子高低起伏
+                let hh = 30 + 26 * (0.5 + 0.5 * sin(t * 2.3 + Double(i) * 1.8))
+                x = cx + k * 30; y = cy + 36 - hh / 2
+                sw = 22; sh = hh; r = 11
             }
         case .parsing:
             // 三个小圆点绕着中心互相追
@@ -133,6 +157,7 @@ final class SimpleAnimationModel {
         let rate = 1 - exp(-dt * 7)
         finished += ((shown == .finished ? 1 : 0) - finished) * rate
         failed += ((shown == .failed ? 1 : 0) - failed) * rate
+        idle += ((shown == .idle ? 1 : 0) - idle) * rate
         if shown == .downloading || shown == .saving {
             prog += ((progress ?? 0) - prog) * (1 - exp(-dt * 6))
         } else {
@@ -149,6 +174,26 @@ final class SimpleAnimationModel {
                 shapes[i].vel[j] += force * dt
                 shapes[i].v[j] += shapes[i].vel[j] * dt
             }
+        }
+
+        // 空闲时外圈的点缀：两段细弧反着转，两个小点各绕各的；离开空闲就淡出
+        if idle > 0.02 {
+            let mid = CGPoint(x: w / 2, y: h / 2)
+            let pen = StrokeStyle(lineWidth: 2, lineCap: .round)
+            func tint(_ c: [Double], _ alpha: Double) -> Color {
+                Color(.sRGB, red: c[0] / 255, green: c[1] / 255, blue: c[2] / 255, opacity: alpha * idle)
+            }
+            var arc = Path()
+            arc.addArc(center: mid, radius: 64, startAngle: .radians(t * 0.5), endAngle: .radians(t * 0.5 + 1.3), clockwise: false)
+            g.stroke(arc, with: .color(tint(pal.violet, 0.28)), style: pen)
+            arc = Path()
+            arc.addArc(center: mid, radius: 76, startAngle: .radians(-t * 0.32 + 2), endAngle: .radians(-t * 0.32 + 2.8), clockwise: false)
+            g.stroke(arc, with: .color(tint(pal.rose, 0.24)), style: pen)
+            let a1 = t * 0.8 + 3, a2 = -t * 0.55
+            let d1 = CGRect(x: w / 2 + cos(a1) * 64 - 3.5, y: h / 2 + sin(a1) * 64 - 3.5, width: 7, height: 7)
+            let d2 = CGRect(x: w / 2 + cos(a2) * 76 - 2.5, y: h / 2 + sin(a2) * 76 - 2.5, width: 5, height: 5)
+            g.fill(Path(ellipseIn: d1), with: .color(tint(pal.amber, 0.9)))
+            g.fill(Path(ellipseIn: d2), with: .color(tint(pal.lav, 0.9)))
         }
 
         // 换状态时荡开的一圈

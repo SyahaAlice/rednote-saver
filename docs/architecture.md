@@ -42,7 +42,7 @@
 | `PreviewView.swift` | 预览页：下载之前列出作品里的每一项，勾选、选视频清晰度；下载直链（`LinksSection`） |
 | `BackgroundRun.swift` | 保存期间不自动锁屏、切走后多要一点时间、iOS 26 起申请后台继续下载 |
 | `Downloader.swift` | 下载单个文件，按文件头决定扩展名 |
-| `StatusAnimation.swift`、`StatusAnimationSimple.swift` | 下载页顶上的状态动画：纯色平面图形，Canvas 实时画，跟着 `SavePhase` 和进度变；不在眼前时停。只是装饰，不接受点按。两种样式在设置页「界面」里选：简洁（默认，三个图形变形）和丰富（备用，多层图形） |
+| `StatusAnimation.swift`、`StatusAnimationSimple.swift` | 下载页顶上的状态动画：纯色平面图形，Canvas 实时画，跟着 `SavePhase` 和进度变；不在眼前时停。只是装饰，不接受点按。两种样式在设置页「界面」里选：简洁（默认，三块色片变形；空闲时轮换四个构图）和丰富（备用，多层图形） |
 | `AlbumLibrary.swift`、`AlbumsView.swift` | 「相册」标签页：列出、搜索、找可能重复的相册；相册内容页；合并、移出、移动、删除相册（都不删照片）。选相册页里的搜索、相册行和它共用 |
 | `LivePhotoMaker.swift`、`LiveTools.swift` | 实况照片配对、视频转实况、实况拆分、音视频合并 |
 | `PhotoSaver.swift` | PhotoKit 入库、相册匹配和命名 |
