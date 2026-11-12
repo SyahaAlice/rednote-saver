@@ -21,27 +21,56 @@ struct AlbumsView: View {
     @State private var askMerge = false
     @State private var working = false
     @State private var failure: String?
+    /// 第一次读完之前是 false（显示转圈）
+    @State private var loaded = false
+    /// 每次重新读加一：读的时候界面照常能用，回来时只认最后一次的结果
+    @State private var loadRound = 0
+    /// 「可能重复」的分组（在后台算）；nil = 还没算出来
+    @State private var allGroups: [(key: String, albums: [Albums.Info])]?
 
+    /// 重新读相册列表。在后台读，读完和现在显示的一样就什么都不动（列表不闪、不重排）
     private func reload() async {
+        loadRound += 1
+        let mine = loadRound
         let ok = await PhotoSaver.hasFullAccess()
+        let fresh = ok ? await Albums.infos() : []
+        guard mine == loadRound else { return }
         access = ok
-        infos = ok ? Albums.infos() : []
-        selected = selected.filter { id in infos.contains { $0.id == id } }
+        loaded = true
+        let same = fresh.count == infos.count && zip(fresh, infos).allSatisfy {
+            $0.id == $1.id && $0.title == $1.title && $0.count == $1.count
+        }
+        if !same {
+            infos = fresh
+            let ids = Set(fresh.map(\.id))
+            selected = selected.filter { ids.contains($0) }
+            allGroups = nil
+        }
+        if filter == .duplicates { await findGroups() }
+    }
+
+    private func findGroups() async {
+        guard allGroups == nil else { return }
+        let mine = loadRound
+        let found = await Albums.duplicateGroups(infos)
+        if mine == loadRound { allGroups = found }
     }
 
     private var shown: [Albums.Info] {
         var list = infos
         if filter == .handwritten { list = list.filter { !$0.ruled } }
-        if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-            list = list.filter { Albums.title($0.title, matches: query) }
+        let parts = Albums.queryParts(query)
+        if !parts.isEmpty {
+            list = list.filter { info in parts.allSatisfy { info.key.contains($0) } }
         }
         return list
     }
 
     private var groups: [(key: String, albums: [Albums.Info])] {
-        Albums.duplicateGroups(infos).filter { g in
-            query.trimmingCharacters(in: .whitespaces).isEmpty
-                || g.albums.contains { Albums.title($0.title, matches: query) }
+        let parts = Albums.queryParts(query)
+        guard !parts.isEmpty else { return allGroups ?? [] }
+        return (allGroups ?? []).filter { g in
+            g.albums.contains { info in parts.allSatisfy { info.key.contains($0) } }
         }
     }
 
@@ -53,7 +82,7 @@ struct AlbumsView: View {
             Button {
                 if selected.contains(info.id) { selected.remove(info.id) } else { selected.insert(info.id) }
             } label: {
-                AlbumRow(title: info.title, count: info.count, cover: info.cover) {
+                AlbumRow(title: info.title, count: info.count, cover: nil, album: info.album) {
                     Image(systemName: selected.contains(info.id) ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(selected.contains(info.id) ? Color.accentColor : Color.secondary)
                 }
@@ -63,7 +92,7 @@ struct AlbumsView: View {
             NavigationLink {
                 AlbumDetailView(album: info.album)
             } label: {
-                AlbumRow(title: info.title, count: info.count, cover: info.cover) {
+                AlbumRow(title: info.title, count: info.count, cover: nil, album: info.album) {
                     Text(info.ruled ? "按规则" : "手写")
                         .font(.caption)
                         .foregroundStyle(info.ruled ? Color.green : Color.secondary)
@@ -118,25 +147,34 @@ struct AlbumsView: View {
                     }
                     .padding(24)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if !loaded {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
                         if filter == .duplicates {
-                            if groups.isEmpty {
+                            let found = groups
+                            if allGroups == nil {
+                                HStack(spacing: 10) {
+                                    ProgressView()
+                                    Text("正在找…").foregroundStyle(.secondary)
+                                }
+                            } else if found.isEmpty {
                                 Text("没有发现可能重复的相册").foregroundStyle(.secondary)
                             }
-                            ForEach(groups, id: \.key) { g in
+                            ForEach(found, id: \.key) { g in
                                 Section("名字里都有「\(g.key)」") {
                                     ForEach(g.albums) { row($0) }
                                 }
                             }
                         } else {
+                            let list = shown
                             Section {
-                                if shown.isEmpty {
+                                if list.isEmpty {
                                     Text(infos.isEmpty ? "还没有自己建的相册" : "没有找到").foregroundStyle(.secondary)
                                 }
-                                ForEach(shown) { row($0) }
+                                ForEach(list) { row($0) }
                             } header: {
-                                Text("\(shown.count) 个相册")
+                                Text("\(list.count) 个相册")
                             }
                         }
                     }
@@ -146,10 +184,12 @@ struct AlbumsView: View {
             }
             .navigationTitle("相册")
             .navigationBarTitleDisplayMode(.inline)
-            .task { await reload() }
             .onAppear { Task { await reload() } }
             .onChange(of: scenePhase) { phase in
                 if phase == .active { Task { await reload() } }
+            }
+            .onChange(of: filter) { value in
+                if value == .duplicates { Task { await findGroups() } }
             }
             .confirmationDialog("合并到哪一个？", isPresented: $askMerge, titleVisibility: .visible) {
                 ForEach(picked) { info in
@@ -462,8 +502,9 @@ struct AlbumPicker: View {
 
     private var shown: [Albums.Info] {
         let list = infos.filter { $0.id != excluding }
-        if query.trimmingCharacters(in: .whitespaces).isEmpty { return list }
-        return list.filter { Albums.title($0.title, matches: query) }
+        let parts = Albums.queryParts(query)
+        if parts.isEmpty { return list }
+        return list.filter { info in parts.allSatisfy { info.key.contains($0) } }
     }
 
     var body: some View {
@@ -476,7 +517,7 @@ struct AlbumPicker: View {
                     Button {
                         onPick(info)
                     } label: {
-                        AlbumRow(title: info.title, count: info.count, cover: info.cover) { EmptyView() }
+                        AlbumRow(title: info.title, count: info.count, cover: nil, album: info.album) { EmptyView() }
                     }
                     .foregroundStyle(.primary)
                 }
@@ -495,7 +536,7 @@ struct AlbumPicker: View {
                     Button("取消") { dismiss() }
                 }
             }
-            .onAppear { infos = Albums.infos() }
+            .task { infos = await Albums.infos() }
         }
     }
 }

@@ -10,49 +10,86 @@ extension Albums {
     struct Info: Identifiable {
         var album: PHAssetCollection
         var title: String
-        var count: Int
+        /// 系统给的数量（不用把相册内容查一遍）；系统一时给不出时是 nil，那一行就不显示数量
+        var count: Int?
         /// 名字是按命名规则写的（能读回账号）
         var ruled: Bool
-        /// 封面用：相册里最新的一项
-        var cover: PHAsset?
+        /// 搜索用：名字去掉大小写、全角半角、空格的差别之后的样子（见 searchKey）
+        var key: String
 
         var id: String { album.localIdentifier }
     }
 
-    /// 用户自己建的全部相册，按名字排
-    static func infos() -> [Info] {
-        let all = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil)
-        var out: [Info] = []
-        all.enumerateObjects { c, _, _ in
-            let assets = PHAsset.fetchAssets(in: c, options: nil)
-            let title = c.localizedTitle ?? ""
-            out.append(Info(album: c, title: title, count: assets.count, ruled: parse(title) != nil,
-                            cover: assets.lastObject))
-        }
-        return out.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    /// 用户自己建的全部相册，按名字排。在后台线程读：相册上千个时在主线程读会卡住界面。
+    /// 这里不碰相册里的照片：数量用系统给的，封面由每一行显示出来时自己去取（见 cover(of:)）
+    static func infos() async -> [Info] {
+        await Task.detached(priority: .userInitiated) {
+            covers.removeAllObjects()
+            let reader = NameReader()
+            let all = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil)
+            var out: [Info] = []
+            out.reserveCapacity(all.count)
+            all.enumerateObjects { c, _, _ in
+                let title = c.localizedTitle ?? ""
+                let n = c.estimatedAssetCount
+                out.append(Info(album: c, title: title, count: n == NSNotFound ? nil : n,
+                                ruled: reader.parse(title) != nil, key: searchKey(title)))
+            }
+            return out.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        }.value
+    }
+
+    /// 取过的封面先记着，列表来回滚动时不用重新查。每次重新读相册列表时清空
+    private static let covers = NSCache<NSString, PHAsset>()
+
+    /// 相册的封面：里面最后一项。在后台线程查
+    static func cover(of album: PHAssetCollection) async -> PHAsset? {
+        let id = album.localIdentifier as NSString
+        if let hit = covers.object(forKey: id) { return hit }
+        let found = await Task.detached(priority: .utility) {
+            PHAsset.fetchAssets(in: album, options: nil).lastObject
+        }.value
+        if let found { covers.setObject(found, forKey: id) }
+        return found
+    }
+
+    private static func fold(_ s: String) -> String {
+        s.folding(options: [.caseInsensitive, .widthInsensitive, .diacriticInsensitive], locale: nil)
+    }
+
+    /// 搜索时拿来比的样子：不分大小写、全角半角，去掉空格
+    static func searchKey(_ title: String) -> String {
+        fold(title).filter { !$0.isWhitespace }
+    }
+
+    /// 输入的搜索词：用空格隔开的几段，每一段都要出现
+    static func queryParts(_ query: String) -> [String] {
+        fold(query).split(whereSeparator: \.isWhitespace).map(String.init)
     }
 
     /// 搜索用的比较：不分大小写、全角半角、不管空格；输入里用空格隔开的几段都要出现
     static func title(_ title: String, matches query: String) -> Bool {
-        func fold(_ s: String) -> String {
-            s.folding(options: [.caseInsensitive, .widthInsensitive, .diacriticInsensitive], locale: nil)
-        }
-        let t = fold(title).filter { !$0.isWhitespace }
-        let parts = fold(query).split(whereSeparator: \.isWhitespace)
-        return parts.allSatisfy { t.contains($0) }
+        let t = searchKey(title)
+        return queryParts(query).allSatisfy { t.contains($0) }
     }
 
     /// 可能是同一个作者的相册：按规则写的相册名里读出 ID 和用户名，别的相册名里也出现了就归成一组。
     /// 返回（共同的那段文字，这一组相册），只保留两个及以上的组
-    static func duplicateGroups(_ infos: [Info]) -> [(key: String, albums: [Info])] {
+    static func duplicateGroups(_ infos: [Info]) async -> [(key: String, albums: [Info])] {
+        await Task.detached(priority: .userInitiated) { findDuplicateGroups(infos) }.value
+    }
+
+    private static func findDuplicateGroups(_ infos: [Info]) -> [(key: String, albums: [Info])] {
+        let reader = NameReader()
         var keys: [String] = []
-        for info in infos {
-            guard let parsed = parse(info.title) else { continue }
+        var known: Set<String> = []
+        for info in infos where info.ruled {
+            guard let parsed = reader.parse(info.title) else { continue }
             for e in parsed.entries {
                 let id = e.cleanID
                 let name = e.name.trimmingCharacters(in: .whitespaces)
-                if id.count >= 4, !keys.contains(id) { keys.append(id) }
-                if name.count >= 2, !keys.contains(name) { keys.append(name) }
+                if id.count >= 4, known.insert(id).inserted { keys.append(id) }
+                if name.count >= 2, known.insert(name).inserted { keys.append(name) }
             }
         }
         var groups: [(key: String, albums: [Info])] = []
@@ -163,13 +200,20 @@ struct AlbumRow<Trailing: View>: View {
     let title: String
     let count: Int?
     let cover: PHAsset?
+    /// 没给封面时，这一行显示出来之后自己去取这个相册的封面（长列表用：只取看得见的那几行）
+    var album: PHAssetCollection?
     @ViewBuilder var trailing: Trailing
+    @State private var fetched: PHAsset?
 
     var body: some View {
         HStack(spacing: 12) {
-            AssetThumb(asset: cover, side: 132)
+            AssetThumb(asset: cover ?? fetched, side: 132)
                 .frame(width: 44, height: 44)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .task(id: album?.localIdentifier) {
+                    fetched = nil
+                    if cover == nil, let album { fetched = await Albums.cover(of: album) }
+                }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).lineLimit(2)
                 if let count {

@@ -43,7 +43,7 @@
 | `BackgroundRun.swift` | 保存期间不自动锁屏、切走后多要一点时间、iOS 26 起申请后台继续下载 |
 | `Downloader.swift` | 下载单个文件，按文件头决定扩展名 |
 | `StatusAnimation.swift` | 下载页顶上的状态动画：三个圆片加圆环、弧线，Canvas 实时画，跟着 `SavePhase` 和进度变；不在眼前时停。圆片始终是正圆，移动只走直线或圆周。只是装饰，不接受点按；设置页「界面」里可以关掉 |
-| `AlbumLibrary.swift`、`AlbumsView.swift` | 「相册」标签页：列出、搜索、找可能重复的相册；相册内容页；合并、移出、移动、删除相册（都不删照片）。选相册页里的搜索、相册行和它共用 |
+| `AlbumLibrary.swift`、`AlbumsView.swift` | 「相册」标签页：列出、搜索、找可能重复的相册；相册内容页；合并、移出、移动、删除相册（都不删照片）。选相册页里的搜索、相册行和它共用。相册列表在后台线程读（`Albums.infos()`），不查相册里的照片：数量用系统给的 `estimatedAssetCount`，封面由每一行显示出来时自己取（`Albums.cover(of:)`）；相册上千个时在主线程逐个查会卡 |
 | `LivePhotoMaker.swift`、`LiveTools.swift` | 实况照片配对、视频转实况、实况拆分、音视频合并 |
 | `PhotoSaver.swift` | PhotoKit 入库、相册匹配和命名 |
 | `CookiePool.swift`、`WebAccounts.swift` | 账号：cookies 文件、登录状态判断、App 内登录 |

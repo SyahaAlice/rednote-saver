@@ -141,23 +141,45 @@ enum Albums {
 
     /// 按当前模板把已有相册名读回成账号列表；读不出来（手写的名字等）返回 nil
     static func parse(_ title: String) -> (style: Style, entries: [Entry])? {
-        // 所有已知前缀 → 平台，长的优先（x_@ 要先于 x_）
-        var table: [(String, String)] = []
-        for p in Prefs.prefixPlatforms { table.append((Prefs.idPrefix(for: p), p)) }
-        table.sort { $0.0.count > $1.0.count }
+        NameReader().parse(title)
+    }
 
-        func pattern(_ template: String) -> NSRegularExpression? {
-            var t = NSRegularExpression.escapedPattern(for: template)
-            t = t.replacingOccurrences(of: NSRegularExpression.escapedPattern(for: "{用户名}"), with: "(.+?)")
-            t = t.replacingOccurrences(of: NSRegularExpression.escapedPattern(for: "{前缀}") +
-                                       NSRegularExpression.escapedPattern(for: "{ID}"), with: "(.+?)")
-            return try? NSRegularExpression(pattern: "^" + t + "$")
+    /// 读相册名用的准备工作（前缀表、每种模板的正则、分隔符）：建一次，可以连着读很多个名字。
+    /// 「相册」页一次要读上千个名字，每个都重新准备一遍会卡
+    struct NameReader {
+        /// 所有已知前缀 → 平台，长的优先（x_@ 要先于 x_）
+        private let table: [(String, String)]
+        private let patterns: [(Style, NSRegularExpression)]
+        private let separator: String
+
+        init() {
+            var table: [(String, String)] = []
+            for p in Prefs.prefixPlatforms { table.append((Prefs.idPrefix(for: p), p)) }
+            table.sort { $0.0.count > $1.0.count }
+            self.table = table
+            separator = Prefs.multiSeparator
+            var patterns: [(Style, NSRegularExpression)] = []
+            for style in Style.allCases {
+                var t = NSRegularExpression.escapedPattern(for: style.template)
+                t = t.replacingOccurrences(of: NSRegularExpression.escapedPattern(for: "{用户名}"), with: "(.+?)")
+                t = t.replacingOccurrences(of: NSRegularExpression.escapedPattern(for: "{前缀}") +
+                                           NSRegularExpression.escapedPattern(for: "{ID}"), with: "(.+?)")
+                if let re = try? NSRegularExpression(pattern: "^" + t + "$") { patterns.append((style, re)) }
+            }
+            self.patterns = patterns
         }
-        for style in Style.allCases {
-            guard let re = pattern(style.template) else { continue }
+
+        func parse(_ title: String) -> (style: Style, entries: [Entry])? {
+            for (style, re) in patterns {
+                if let entries = read(title, re) { return (style, entries) }
+            }
+            return nil
+        }
+
+        private func read(_ title: String, _ re: NSRegularExpression) -> [Entry]? {
             var entries: [Entry] = []
             var ok = true
-            for part in title.components(separatedBy: Prefs.multiSeparator) {
+            for part in title.components(separatedBy: separator) {
                 let ns = part as NSString
                 guard let m = re.firstMatch(in: part, range: NSRange(location: 0, length: ns.length)),
                       m.numberOfRanges >= 3 else { ok = false; break }
@@ -168,9 +190,8 @@ enum Albums {
                 }
                 entries.append(Entry(platform: hit.1, name: name, id: String(tag.dropFirst(hit.0.count))))
             }
-            if ok, !entries.isEmpty { return (style, entries) }
+            return ok && !entries.isEmpty ? entries : nil
         }
-        return nil
     }
 
     /// 相册名里有没有按规则写的这个账号：完整的「前缀 + ID」，后面不能紧跟着别的字母数字
