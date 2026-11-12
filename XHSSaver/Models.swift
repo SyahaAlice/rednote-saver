@@ -149,8 +149,8 @@ enum Prefs {
     static let imageFormatKey = "imageFormat"
     /// 下载页「自动粘贴」开关：打开 App、切回来时把剪贴板里的新文字填进输入框
     static let autoPasteKey = "autoPaste"
-    /// 下载页顶部动画的样式：simple（简洁，默认）或 rich（丰富，备用）
-    static let animationStyleKey = "animationStyle"
+    /// 下载页顶部的动画开不开（默认开）
+    static let animationOnKey = "animationOn"
     static let usePublishDateKey = "usePublishDate"
     static let albumPrefixesKey = "albumPrefixes"
 

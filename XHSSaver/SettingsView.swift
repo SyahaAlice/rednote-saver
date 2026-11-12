@@ -26,7 +26,7 @@ struct SettingsView: View {
     /// 账号一节的详细说明平时收起
     @State private var showAccountHelp = false
     @AppStorage(WebAccounts.autoRenewKey) private var autoRenew = true
-    @AppStorage(Prefs.animationStyleKey) private var animationStyle = "simple"
+    @AppStorage(Prefs.animationOnKey) private var animationOn = true
     /// 导出 / 导入账号
     @State private var exportDocument: CookieBundleDocument?
     @State private var showExport = false
@@ -74,11 +74,8 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Picker("下载页顶部动画", selection: $animationStyle) {
-                        Text("简洁").tag("simple")
-                        Text("丰富").tag("rich")
-                    }
-                    .accessibilityIdentifier("animation-style")
+                    Toggle("下载页顶部动画", isOn: $animationOn)
+                        .accessibilityIdentifier("animation-toggle")
                 } header: {
                     Label("界面", systemImage: "sparkles")
                 }

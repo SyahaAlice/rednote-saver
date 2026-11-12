@@ -1,11 +1,9 @@
 import SwiftUI
 
-/// 下载页顶上的状态动画：全部是纯色的平面图形，用 Canvas 实时画，不带任何素材。
-/// 有两种样式，在设置页选：
-/// - 简洁（默认）：只有三个图形，靠变形和弹性表达状态，见 StatusAnimationSimple.swift
-/// - 丰富（备用）：三层——背景的大色块和点阵、16 个小图形在三条轨道上绕着中心转、中间的圆和两圈细环，
-///   见下面的 StatusAnimationModel
-/// 只是装饰：不接受点按，辅助功能里看不到（状态由 `phase` 标识给出）
+/// 下载页顶上的状态动画：三个纯色的圆片，加上圆环和弧线，用 Canvas 实时画，不带任何素材。
+/// 两条规矩（用户定的）：圆片从头到尾都是正圆，只变大小、不拉长不压扁；移动只走直线或圆周。
+/// 只是装饰：不接受点按，辅助功能里看不到（状态由 `phase` 标识给出）。
+/// 设置页可以关掉；关掉后这块地方留空，下面的输入框不挪位置
 struct StatusAnimation: View {
     enum Kind: Int, CaseIterable {
         case idle, parsing, waiting, downloading, saving, finished, failed
@@ -19,429 +17,342 @@ struct StatusAnimation: View {
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @AppStorage(Prefs.animationStyleKey) private var style = "simple"
-    @State private var simple = SimpleAnimationModel()
-    @State private var rich = StatusAnimationModel()
+    @AppStorage(Prefs.animationOnKey) private var enabled = true
+    @State private var model = StatusAnimationModel()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: paused || reduceMotion)) { line in
-            Canvas { g, size in
-                if style == "rich" {
-                    rich.render(g, size: size, dark: scheme == .dark, date: line.date, kind: kind, progress: progress)
-                } else {
-                    simple.render(g, size: size, dark: scheme == .dark, date: line.date, kind: kind, progress: progress)
+        if enabled {
+            TimelineView(.animation(minimumInterval: 1.0 / 60, paused: paused || reduceMotion)) { line in
+                Canvas { g, size in
+                    model.render(g, size: size, dark: scheme == .dark, date: line.date, kind: kind, progress: progress)
                 }
             }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        } else {
+            Color.clear
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
 
-/// 「丰富」样式的全部状态和画法。是引用类型：每一帧在 Canvas 里直接改，不经过 SwiftUI 的状态更新
+/// 动画的全部状态和画法。是引用类型：每一帧在 Canvas 里直接改，不经过 SwiftUI 的状态更新
 final class StatusAnimationModel {
     private typealias Kind = StatusAnimation.Kind
 
-    private struct RGB {
-        var r: Double, g: Double, b: Double
-        func mix(_ o: RGB, _ t: Double) -> RGB {
-            RGB(r: r + (o.r - r) * t, g: g + (o.g - g) * t, b: b + (o.b - b) * t)
-        }
-        func color(_ alpha: Double) -> Color {
-            Color(.sRGB, red: r / 255, green: g / 255, blue: b / 255, opacity: min(1, max(0, alpha)))
-        }
+    /// 一个圆片的全部数值，按这个顺序放在数组里：0 x、1 y、2 半径、3 不透明度、4…6 颜色（红绿蓝，0…255）。
+    /// 每个数值各带一根弹簧，到位时会过冲一点再回来；三个圆片的弹簧松紧不同，所以有先有后
+    private struct Disc {
+        var v: [Double] = []
+        var vel = [Double](repeating: 0, count: 7)
+        let k: Double
+        let d: Double
     }
 
     private struct Palette {
-        let violet: RGB, rose: RGB, lav: RGB, peach: RGB, fg: RGB, bg: RGB, amber: RGB, green: RGB
-        static let light = Palette(violet: RGB(r: 106, g: 61, b: 240), rose: RGB(r: 255, g: 94, b: 126),
-                                   lav: RGB(r: 185, g: 165, b: 255), peach: RGB(r: 255, g: 177, b: 153),
-                                   fg: RGB(r: 28, g: 27, b: 34), bg: RGB(r: 242, g: 241, b: 247),
-                                   amber: RGB(r: 245, g: 165, b: 36), green: RGB(r: 31, g: 174, b: 122))
-        static let dark = Palette(violet: RGB(r: 138, g: 102, b: 255), rose: RGB(r: 255, g: 111, b: 140),
-                                  lav: RGB(r: 168, g: 146, b: 255), peach: RGB(r: 255, g: 169, b: 143),
-                                  fg: RGB(r: 241, g: 240, b: 246), bg: RGB(r: 15, g: 14, b: 20),
-                                  amber: RGB(r: 255, g: 184, b: 77), green: RGB(r: 53, g: 201, b: 144))
-        func element(_ i: Int) -> RGB {
-            switch i {
-            case 0: return violet
-            case 1: return rose
-            case 2: return lav
-            case 3: return peach
-            default: return fg
-            }
-        }
+        let violet: [Double], rose: [Double], lav: [Double], amber: [Double], green: [Double]
+        static let light = Palette(violet: [106, 61, 240], rose: [255, 94, 126], lav: [185, 165, 255],
+                                   amber: [245, 165, 36], green: [31, 174, 122])
+        static let dark = Palette(violet: [138, 102, 255], rose: [255, 111, 140], lav: [168, 146, 255],
+                                  amber: [255, 184, 77], green: [53, 201, 144])
     }
 
-    /// 一个小图形
-    private struct Element {
-        let index: Int
-        /// 0 圆 1 方 2 三角 3 圆环 4 半圆 5 加号 6 胶囊
-        let type: Int
-        let color: Int
-        let size: Double
-        /// 在第几条轨道上
-        let ring: Int
-        /// 每个图形自己的一个 0…1 的数：决定它过渡得快还是慢、下载时什么时候进场
-        let k: Double
-        let spin: Double
-        var angle: Double
-        var x = 0.0, y = 0.0, rot = 0.0, scale = 1.0, alpha = 1.0
-        var lastP = 0.0
-        var placed = false
-        /// 画在中间的圆后面
-        var behind = false
-    }
-
-    private static let count = 16
-    private static let ringSpeed: [Double] = [0.28, -0.2, 0.14]
-    private static let ringX: [Double] = [72, 108, 142]
-    private static let ringY: [Double] = [30, 48, 64]
-    /// 各状态下：转速、轨道大小
-    private static let speeds: [Double] = [1, 3.4, 0.15, 1.8, 0, 0.7, 0]
-    private static let radii: [Double] = [1, 0.7, 1.06, 1, 1, 1.16, 1]
-
-    private var els: [Element]
-    /// 每个状态现在占多少（0…1），切换时一个升一个降
-    private var amt = [Double](repeating: 0, count: Kind.allCases.count)
-    /// 外面要的状态，和现在画的状态（完成 / 失败停几秒后自己回到空闲）
+    /// 进度圆环的半径
+    private let ring = 34.0
+    private var discs = [Disc(k: 230, d: 20), Disc(k: 180, d: 17), Disc(k: 140, d: 15)]
     private var requested = Kind.idle
     private var shown = Kind.idle
     private var since = 0.0
     private var last = 0.0
     private var t = 0.0
-    private var speed = 1.0
-    private var radius = 1.0
-    private var ringAngle = 0.0
-    private var pop = 0.0
-    private var shake = 0.0
     private var prog = 0.0
-    private var ripples: [Double] = []
-
-    init() {
-        let sizes: [Double] = [7, 10, 8, 12, 9]
-        var list: [Element] = []
-        for i in 0..<Self.count {
-            let d = Double(i)
-            let spin = (i % 2 == 1 ? 1.0 : -1.0) * (0.4 + (d * 0.37).truncatingRemainder(dividingBy: 1))
-            let angle = d / Double(Self.count) * 6.283 * 3 + (d * 1.7).truncatingRemainder(dividingBy: 1)
-            list.append(Element(index: i, type: i % 8 == 7 ? 0 : i % 8, color: (i * 3) % 5, size: sizes[i % 5], ring: i % 3,
-                                k: (d * 0.618).truncatingRemainder(dividingBy: 1), spin: spin, angle: angle))
-        }
-        els = list
-        amt[Kind.idle.rawValue] = 1
-    }
-
-    private func ease(_ v: Double, _ to: Double, _ dt: Double, _ k: Double) -> Double {
-        v + (to - v) * (1 - exp(-dt * k))
-    }
+    private var ripple = 9.0
+    /// 每个状态显示了多少（0…1），线条跟着它淡入淡出。下标是 Kind.rawValue
+    private var amt: [Double] = [1, 0, 0, 0, 0, 0, 0]
+    /// 空闲的四个构图各自显示了多少
+    private var pose: [Double] = [1, 0, 0, 0]
 
     private func enter(_ k: Kind) {
         guard k != shown else { return }
         shown = k
         since = t
-        pop = 1
-        ripples.append(0)
-        if k == .failed { shake = 1 }
+        ripple = 0
     }
 
-    private func circle(_ x: Double, _ y: Double, _ r: Double) -> Path {
-        Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2))
+    private func tint(_ c: [Double], _ alpha: Double) -> Color {
+        Color(.sRGB, red: c[0] / 255, green: c[1] / 255, blue: c[2] / 255, opacity: min(1, max(0, alpha)))
     }
 
-    private func arc(_ x: Double, _ y: Double, _ r: Double, _ from: Double, _ to: Double) -> Path {
-        var p = Path()
-        p.addArc(center: CGPoint(x: x, y: y), radius: r, startAngle: .radians(from), endAngle: .radians(to), clockwise: false)
-        return p
+    /// 空闲时现在轮到第几个构图（每个 3.8 秒）
+    private var idlePose: Int { Int(t / 3.8) % 4 }
+
+    /// 心跳：一下猛的，然后衰减着抖两下。i 越大越晚开始
+    private func beat(_ i: Int) -> Double {
+        var q = ((t - Double(i) * 0.16) / 1.9).truncatingRemainder(dividingBy: 1)
+        if q < 0 { q += 1 }
+        return exp(-q * 5) * sin(q * 15)
     }
 
-    private func stroke(_ width: Double) -> StrokeStyle {
-        StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
+    /// 两圈轨道上的角度：匀速之外叠两个互不合拍的快慢变化，看不出重复
+    private func orbitAngle(_ n: Int) -> Double {
+        if n == 1 {
+            let wobble: Double = 0.75 * sin(t * 0.7) + 0.3 * sin(t * 1.9)
+            return t * 0.9 + wobble
+        }
+        let wobble: Double = 0.9 * sin(t * 0.43 + 1) + 0.25 * sin(t * 1.3)
+        return 2 - t * 0.6 - wobble
+    }
+
+    private func orbitSpeed(_ n: Int) -> Double {
+        if n == 1 {
+            let wobble: Double = 0.525 * cos(t * 0.7) + 0.57 * cos(t * 1.9)
+            return 0.9 + wobble
+        }
+        let wobble: Double = 0.387 * cos(t * 0.43 + 1) + 0.325 * cos(t * 1.3)
+        return 0.6 + wobble
+    }
+
+    /// 进度圆环头上的角度。不知道进度时一直转
+    private func headAngle(known: Bool) -> Double {
+        known ? -Double.pi / 2 + 2 * Double.pi * prog : t * 3.2
+    }
+
+    /// 第 i 个圆片现在该是什么样
+    private func target(_ i: Int, _ w: Double, _ h: Double, _ pal: Palette, known: Bool) -> [Double] {
+        let cx = w / 2, cy = h / 2
+        let age = t - since
+        let di = Double(i), k = Double(i - 1)
+        var x = cx, y = cy, r = 10.0, alpha = 1.0
+        var c = i == 0 ? pal.violet : (i == 1 ? pal.rose : pal.lav)
+
+        switch shown {
+        case .idle:
+            alpha = 0.82
+            switch idlePose {
+            case 0:
+                // 三个圆叠成一朵：沿同一个圆周转（半径不变），时快时慢；大小轮流起伏
+                let a = t * 0.5 + 0.7 * sin(t * 0.8) + di * 2.094
+                x = cx + cos(a) * 16; y = cy + sin(a) * 16
+                r = 24 + 4 * sin(t * 1.6 - di * 2.094)
+            case 1:
+                // 一大两小沿两圈轨道绕；小圆掠过右侧时中间的大圆鼓一下
+                if i == 0 {
+                    r = 14 + 3.5 * pow(max(0, cos(orbitAngle(1))), 6)
+                } else {
+                    let a = orbitAngle(i), rad = i == 1 ? 36.0 : 56.0
+                    x = cx + cos(a) * rad; y = cy + sin(a) * rad
+                    r = i == 1 ? 8 : 5.5
+                }
+                alpha = 0.95
+            case 2:
+                // 在一条水平直线上来回穿梭：同一个节拍，三个圆错开三分之一拍，幅度不同，所以互相穿过、叠在一起又分开
+                let reach: Double = i == 0 ? 60 : (i == 1 ? 42 : 66)
+                x = cx + sin(t * 1.7 + di * 2.094) * reach
+                r = i == 0 ? 21 : (i == 1 ? 15 : 11)
+                alpha = 0.85
+            default:
+                // 同心圆，像心跳一样由里向外一圈推一圈
+                let base = i == 0 ? 44.0 : (i == 1 ? 29.0 : 14.0)
+                let swing = i == 0 ? 0.1 : (i == 1 ? 0.15 : 0.3)
+                r = base * (1 + swing * beat(2 - i))
+                alpha = i == 0 ? 0.45 : (i == 1 ? 0.7 : 0.95)
+            }
+        case .parsing:
+            // 三个小点绕圈互相追
+            let a = t * 5.2 + di * 2.094
+            x = cx + cos(a) * 24; y = cy + sin(a) * 24
+            r = 6.5
+        case .waiting:
+            // 三个点轮流跳，中间那个是黄色
+            x = cx + k * 28
+            y = cy - pow(max(0, sin(t * 3.2 - di * 0.7)), 3) * 16
+            r = 7.5
+            if i == 1 { c = pal.amber }
+        case .downloading, .saving:
+            // 0：中间的圆，随进度变大；1：下载时一遍遍往下落的小点，保存时绕圈的小点；2：顶在进度头上的小圆
+            let save = shown == .saving
+            if i == 0 {
+                r = known ? 9 + 14 * prog : 12 + 2 * sin(t * 2)
+                c = save ? pal.rose : pal.violet
+                alpha = 0.28
+            } else if i == 1 {
+                r = 4
+                if save {
+                    x = cx + cos(t * 4) * 13; y = cy + sin(t * 4) * 13
+                    c = pal.rose
+                } else {
+                    let f = (t * 1.3).truncatingRemainder(dividingBy: 1)
+                    y = cy - 16 + 32 * f
+                    c = pal.violet
+                    alpha = sin(Double.pi * f)
+                }
+            } else {
+                let a = headAngle(known: known)
+                x = cx + cos(a) * ring; y = cy + sin(a) * ring
+                r = 7 + 1.5 * sin(t * 6)
+                c = save ? pal.violet : pal.rose
+            }
+        case .finished, .failed:
+            // 合成一个圆：完成是绿的，失败是红的、左右晃几下
+            let ok = shown == .finished
+            c = ok ? pal.green : pal.rose
+            x = cx + (ok ? 0 : sin(age * 34) * 9 * exp(-age * 4))
+            if i == 0 {
+                r = 29
+            } else {
+                alpha = 0
+            }
+        }
+        return [x, y, r, alpha, c[0], c[1], c[2]]
     }
 
     func render(_ g: GraphicsContext, size: CGSize, dark: Bool, date: Date, kind: StatusAnimation.Kind, progress: Double?) {
         let now = date.timeIntervalSinceReferenceDate
-        let dt = last == 0 ? 0 : min(0.05, max(0, now - last))
+        let dt = last == 0 ? 0 : min(0.033, max(0, now - last))
         last = now
         t += dt
+        ripple += dt
 
         if kind != requested {
             requested = kind
             enter(kind)
         }
-        // 完成、失败停 6 秒就回到空闲的样子，不一直挂着
+        // 完成、失败停 6 秒就回到空闲的样子
         if (shown == .finished || shown == .failed) && t - since > 6 { enter(.idle) }
 
+        let rate = 1 - exp(-dt * 7)
         for k in Kind.allCases {
-            amt[k.rawValue] = ease(amt[k.rawValue], k == shown ? 1 : 0, dt, 6)
+            amt[k.rawValue] += ((shown == k ? 1 : 0) - amt[k.rawValue]) * rate
         }
-        speed = ease(speed, Self.speeds[shown.rawValue], dt, 3)
-        radius = ease(radius, Self.radii[shown.rawValue], dt, 4)
-        pop = ease(pop, 0, dt, 5)
-        shake = ease(shake, 0, dt, 4)
-        ringAngle += dt * speed * 0.8
+        for n in 0..<4 {
+            pose[n] += ((shown == .idle && idlePose == n ? 1 : 0) - pose[n]) * rate
+        }
         if shown == .downloading || shown == .saving {
-            prog = ease(prog, progress ?? 0, dt, 6)
+            prog += ((progress ?? 0) - prog) * (1 - exp(-dt * 6))
         } else {
             prog = 0
         }
 
         let pal = dark ? Palette.dark : Palette.light
         let w = Double(size.width), h = Double(size.height)
-        let cx = w / 2 + sin(t * 38) * 5 * shake
-        let cy = h / 2
-        let sx = min(1.25, (w / 2 - 12) / (142 * 1.16))
-        let cell = min(30, (w - 24) / 8)
-
-        drawBackground(g, pal, w, h)
-        updateElements(dt, w, h, cx, cy, sx, cell, known: progress != nil)
-        for e in els where e.behind { drawElement(g, e, pal, cell) }
-        drawHub(g, pal, cx, cy, dt, known: progress != nil)
-        for e in els where !e.behind { drawElement(g, e, pal, cell) }
-    }
-
-    // 第一层：大色块、点阵、斜线
-    private func drawBackground(_ g: GraphicsContext, _ pal: Palette, _ w: Double, _ h: Double) {
-        let drift = sin(t * 0.25) * 6
-        g.fill(circle(w * 0.17 + drift, h * 0.36, 54 + speed * 2), with: .color(pal.violet.color(0.07)))
-        let a0 = ringAngle * 0.3
-        g.stroke(arc(w * 0.86 - drift, h * 0.72, 42, a0, a0 + 4.2), with: .color(pal.rose.color(0.09)),
-                 style: StrokeStyle(lineWidth: 14))
-        let pill = CGRect(x: w * 0.30 + drift * 0.5, y: h * 0.78, width: 46, height: 12)
-        g.fill(Path(roundedRect: pill, cornerRadius: 6), with: .color(pal.peach.color(0.16)))
-        // 点阵：解析时有一条亮带从右往左扫
-        let parsing = amt[Kind.parsing.rawValue]
-        for c in 0..<6 {
-            let scan = max(0, sin(Double(c) * 0.9 - t * 5)) * parsing
-            let color = pal.fg.mix(pal.violet, scan).color(0.16 + 0.5 * scan)
-            for r in 0..<4 {
-                g.fill(circle(w * 0.66 + Double(c) * 9, h * 0.1 + Double(r) * 9, 1.4 + scan * 0.8), with: .color(color))
+        let cx = w / 2, cy = h / 2
+        let known = progress != nil
+        for i in discs.indices {
+            let to = target(i, w, h, pal, known: known)
+            if discs[i].v.isEmpty { discs[i].v = to }
+            for j in 0..<7 {
+                let force = (to[j] - discs[i].v[j]) * discs[i].k - discs[i].vel[j] * discs[i].d
+                discs[i].vel[j] += force * dt
+                discs[i].v[j] += discs[i].vel[j] * dt
             }
         }
-        let slide = (ringAngle * 6).truncatingRemainder(dividingBy: 8)
-        var lines = Path()
-        for l in 0..<5 {
-            let lx = w * 0.06 + Double(l) * 8 + slide
-            lines.move(to: CGPoint(x: lx, y: h * 0.9))
-            lines.addLine(to: CGPoint(x: lx + 10, y: h * 0.78))
-        }
-        g.stroke(lines, with: .color(pal.fg.color(0.1)), style: StrokeStyle(lineWidth: 2))
-    }
 
-    // 第二层：算每个小图形该去哪，再让它带着自己的快慢靠过去
-    private func updateElements(_ dt: Double, _ w: Double, _ h: Double, _ cx: Double, _ cy: Double,
-                                _ sx: Double, _ cell: Double, known: Bool) {
-        let n = Self.count
-        let orbit = shown != .downloading && shown != .saving && shown != .failed
-        let lit = Int((prog * Double(n)).rounded())
-        for i in els.indices {
-            var e = els[i]
-            e.angle += dt * speed * Self.ringSpeed[e.ring]
-            let depth = sin(e.angle)
-            let rx = Self.ringX[e.ring] * sx
-            let ry = Self.ringY[e.ring]
-            var tx = 0.0, ty = 0.0, tScale = 1.0, tAlpha = 1.0
-            var tRot = e.rot + dt * e.spin * (0.4 + speed * 0.5)
-            var k = 3 + e.k * 5
-
-            switch shown {
-            case .downloading:
-                // 从外圈旋进中心，到了就从外圈重新来
-                let p = (t * 0.38 + e.k).truncatingRemainder(dividingBy: 1)
-                let rad = pow(1 - p, 1.4) * 1.2
-                let a = e.angle + p * 2.2
-                tx = cx + cos(a) * rx * rad
-                ty = cy + sin(a) * ry * rad
-                tScale = 1 - 0.65 * p
-                tAlpha = min(1, p * 8) * min(1, (1 - p) * 5)
-                k = 14
-                if p < e.lastP {
-                    e.x = tx
-                    e.y = ty
-                    e.alpha = 0
-                }
-                e.lastP = p
-            case .saving:
-                // 排成两排方格；进度到哪亮到哪，不知道进度就一格格轮着亮
-                tx = cx + (Double(e.index % 8) - 3.5) * cell
-                ty = cy + (Double(e.index / 8) - 0.5) * cell
-                tScale = 0.78
-                tRot = 0
-                if known {
-                    tAlpha = e.index < lit ? 1 : 0.3
-                } else {
-                    tAlpha = 0.3 + 0.7 * max(0, sin(t * 3 - Double(e.index) * 0.5))
-                }
-            case .failed:
-                // 掉到底边
-                tx = w * (0.08 + 0.84 * Double((e.index * 7) % n) / Double(n - 1))
-                ty = h - 13 - Double(e.index % 3) * 3
-                tScale = 0.9
-                tAlpha = 0.6
-                tRot = e.spin * 2
-                k = 5 + e.k * 6
-            default:
-                tx = cx + cos(e.angle) * rx * radius
-                ty = cy + sin(e.angle) * ry * radius
-                tScale = 0.82 + 0.24 * depth
-            }
-
-            if !e.placed {
-                e.x = tx
-                e.y = ty
-                e.placed = true
-            }
-            e.x = ease(e.x, tx, dt, k)
-            e.y = ease(e.y, ty, dt, k)
-            e.scale = ease(e.scale, tScale, dt, k)
-            e.alpha = ease(e.alpha, tAlpha, dt, 8)
-            e.rot = ease(e.rot, tRot, dt, 8)
-            e.behind = shown == .downloading || (orbit && depth < 0)
-            els[i] = e
-        }
-    }
-
-    private func drawElement(_ g: GraphicsContext, _ e: Element, _ pal: Palette, _ cell: Double) {
-        let grey = pal.fg.mix(pal.bg, 0.55)
-        let rgb = pal.element(e.color).mix(grey, amt[Kind.failed.rawValue] * 0.8)
-        let saving = amt[Kind.saving.rawValue]
-        var c = g
-        c.translateBy(x: e.x, y: e.y)
-        if saving > 0.02 {
-            // 保存时每个图形底下垫一块浅色方格，像相册里的缩略图
-            let tile = CGRect(x: -cell * 0.4, y: -cell * 0.4, width: cell * 0.8, height: cell * 0.8)
-            c.fill(Path(roundedRect: tile, cornerRadius: 6), with: .color(rgb.color(saving * 0.16 * (e.alpha > 0.6 ? 1 : 0.5))))
-        }
-        c.rotate(by: .radians(e.rot))
-        c.scaleBy(x: e.scale, y: e.scale)
-        let s = e.size
-        let shading = GraphicsContext.Shading.color(rgb.color(e.alpha))
-        switch e.type {
-        case 0:
-            c.fill(circle(0, 0, s / 2), with: shading)
-        case 1:
-            c.fill(Path(roundedRect: CGRect(x: -s / 2, y: -s / 2, width: s, height: s), cornerRadius: s * 0.22), with: shading)
-        case 2:
+        // 画一段圆弧（从 a0 到 a1，角度增大的方向）、一整圈、一个圆点
+        func arc(_ radius: Double, _ a0: Double, _ a1: Double, _ color: Color, _ width: Double) {
             var p = Path()
-            p.move(to: CGPoint(x: -s * 0.4, y: -s * 0.5))
-            p.addLine(to: CGPoint(x: s * 0.55, y: 0))
-            p.addLine(to: CGPoint(x: -s * 0.4, y: s * 0.5))
-            p.closeSubpath()
-            c.fill(p, with: shading)
-        case 3:
-            c.stroke(circle(0, 0, s * 0.42), with: shading, style: StrokeStyle(lineWidth: s * 0.26))
-        case 4:
-            var p = arc(0, 0, s * 0.55, 0, Double.pi)
-            p.closeSubpath()
-            c.fill(p, with: shading)
-        case 5:
-            let bar = s * 0.28
-            var p = Path()
-            p.addRect(CGRect(x: -s / 2, y: -bar / 2, width: s, height: bar))
-            p.addRect(CGRect(x: -bar / 2, y: -s / 2, width: bar, height: s))
-            c.fill(p, with: shading)
-        default:
-            let r = CGRect(x: -s * 0.65, y: -s * 0.28, width: s * 1.3, height: s * 0.56)
-            c.fill(Path(roundedRect: r, cornerRadius: s * 0.28), with: shading)
+            p.addArc(center: CGPoint(x: cx, y: cy), radius: radius,
+                     startAngle: .radians(a0), endAngle: .radians(a1), clockwise: false)
+            g.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round))
         }
-    }
-
-    // 第三层：中间的圆、两圈细环、进度、圆里的记号
-    private func drawHub(_ g: GraphicsContext, _ pal: Palette, _ cx: Double, _ cy: Double, _ dt: Double, known: Bool) {
-        let idle = amt[Kind.idle.rawValue], parsing = amt[Kind.parsing.rawValue], waiting = amt[Kind.waiting.rawValue]
-        let downloading = amt[Kind.downloading.rawValue], saving = amt[Kind.saving.rawValue]
-        let finished = amt[Kind.finished.rawValue], failed = amt[Kind.failed.rawValue]
-        let hubColor = pal.violet.mix(pal.green, finished).mix(pal.rose, failed)
-
-        // 换状态时从圆上荡出去的一圈
-        ripples = ripples.map { $0 + dt }.filter { $0 < 0.9 }
-        for age in ripples {
-            g.stroke(circle(cx, cy, 24 + age * 110), with: .color(hubColor.color((1 - age / 0.9) * 0.45)),
-                     style: StrokeStyle(lineWidth: 2))
+        func circle(_ radius: Double, _ color: Color, _ width: Double) {
+            let rect = CGRect(x: cx - radius, y: cy - radius, width: radius * 2, height: radius * 2)
+            g.stroke(Path(ellipseIn: rect), with: .color(color), style: StrokeStyle(lineWidth: width))
+        }
+        func dot(_ x: Double, _ y: Double, _ radius: Double, _ color: Color) {
+            let rr = max(0.1, radius)
+            g.fill(Path(ellipseIn: CGRect(x: x - rr, y: y - rr, width: rr * 2, height: rr * 2)), with: .color(color))
         }
 
-        // 保存时圆收起来，把中间让给方格
-        let hub = (1 - saving) * (1 + pop * 0.16 + sin(t * 3) * 0.035 * waiting)
-        guard hub > 0.03 else { return }
-        let r0 = 24 * hub
-
-        let ringColor = hubColor.color(0.45 * (1 - downloading) * hub)
-        for i in 0..<3 {
-            let a = ringAngle + Double(i) * 2.094
-            g.stroke(arc(cx, cy, 34 * hub, a, a + 1.25), with: .color(ringColor), style: StrokeStyle(lineWidth: 2))
-        }
-        for d in 0..<12 {
-            let a = -ringAngle * 0.6 + Double(d) * 0.5236
-            g.fill(circle(cx + cos(a) * 42 * hub, cy + sin(a) * 42 * hub, 1.3), with: .color(pal.fg.color(0.22 * hub)))
-        }
-        if downloading > 0.02 {
-            g.stroke(circle(cx, cy, 34), with: .color(hubColor.color(0.16 * downloading)), style: StrokeStyle(lineWidth: 4))
-            let top = -Double.pi / 2
-            // 知道进度就画进度，不知道就画一段转着的弧
-            let bar = known ? arc(cx, cy, 34, top, top + 6.283 * max(0.01, prog)) : arc(cx, cy, 34, t * 4, t * 4 + 1.6)
-            g.stroke(bar, with: .color(pal.rose.color(downloading)), style: stroke(4))
-        }
-        if waiting > 0.02 {
-            let a = t * 0.8
-            g.fill(circle(cx + cos(a) * 34, cy + sin(a) * 34, 4), with: .color(pal.amber.color(waiting * (0.6 + 0.4 * sin(t * 4)))))
-        }
-        g.fill(circle(cx, cy, r0), with: .color(hubColor.color(1)))
-
-        var c = g
-        c.clip(to: circle(cx, cy, r0))
-        c.translateBy(x: cx, y: cy)
-        c.scaleBy(x: hub, y: hub)
-        let pen = stroke(3)
-        func ink(_ a: Double) -> GraphicsContext.Shading { .color(Color.white.opacity(min(1, max(0, a)))) }
-        func arrow(_ y: Double) -> Path {
-            var p = Path()
-            p.move(to: CGPoint(x: 0, y: y - 9))
-            p.addLine(to: CGPoint(x: 0, y: y + 7))
-            p.move(to: CGPoint(x: -6, y: y + 1))
-            p.addLine(to: CGPoint(x: 0, y: y + 7))
-            p.addLine(to: CGPoint(x: 6, y: y + 1))
-            return p
-        }
+        // —— 线条，都画在圆片下面 ——
+        // 空闲：外圈两段细弧反着转，两个小点各绕各的；起点的快慢、弧的长短各按不合拍的节奏变
+        let idle = amt[Kind.idle.rawValue]
         if idle > 0.02 {
-            // 空闲：向下的箭头，轻轻上下动
-            var p = arrow(sin(t * 1.6) * 1.5 - 1)
-            p.move(to: CGPoint(x: -7, y: 12))
-            p.addLine(to: CGPoint(x: 7, y: 12))
-            c.stroke(p, with: ink(idle), style: pen)
+            let s1: Double = t * 0.5 + 0.9 * sin(t * 0.37)
+            let l1: Double = 1.3 + 0.8 * sin(t * 0.61 + 1) + 0.3 * sin(t * 1.7)
+            let s2: Double = 2 - t * 0.32 - 0.8 * sin(t * 0.29 + 2)
+            let l2: Double = 1.0 + 0.6 * sin(t * 0.83) + 0.25 * sin(t * 1.4 + 2)
+            arc(72, s1, s1 + l1, tint(pal.violet, 0.28 * idle), 2)
+            arc(80, s2, s2 + l2, tint(pal.rose, 0.24 * idle), 2)
+            let d1: Double = t * 0.8 + 3 + 1.1 * sin(t * 0.45)
+            let d2: Double = -t * 0.55 - 0.9 * sin(t * 0.5 + 1)
+            dot(cx + cos(d1) * 72, cy + sin(d1) * 72, 3.5, tint(pal.amber, 0.9 * idle))
+            dot(cx + cos(d2) * 80, cy + sin(d2) * 80, 2.5, tint(pal.lav, 0.9 * idle))
         }
+        // 空闲的第二个构图：两圈轨道，小圆身后的亮弧跑得越快拖得越长
+        if pose[1] > 0.02 {
+            circle(36, tint(pal.rose, 0.16 * pose[1]), 1.5)
+            circle(56, tint(pal.lav, 0.22 * pose[1]), 1.5)
+            let a1 = orbitAngle(1), t1 = 0.25 + 1.1 * max(0, orbitSpeed(1))
+            arc(36, a1 - t1, a1, tint(pal.rose, 0.55 * pose[1]), 2.5)
+            let a2 = orbitAngle(2), t2 = 0.2 + 1.3 * max(0, orbitSpeed(2))
+            arc(56, a2, a2 + t2, tint(pal.lav, 0.7 * pose[1]), 2.5)
+        }
+        // 解析：每个点身后拖一段弧线
+        let parsing = amt[Kind.parsing.rawValue]
         if parsing > 0.02 {
-            // 解析：转动的弧线
-            c.stroke(arc(0, 0, 9, t * 6, t * 6 + 4.2), with: ink(parsing), style: pen)
-            c.fill(circle(0, 0, 2.2), with: ink(parsing))
-        }
-        if waiting > 0.02 {
-            // 等回答：三个点依次亮
-            for i in 0..<3 {
-                let a = waiting * (0.35 + 0.65 * max(0, sin(t * 3.5 - Double(i) * 0.9)))
-                c.fill(circle(Double(i - 1) * 8, 0, 2.6), with: ink(a))
+            for s in discs {
+                let v = s.v
+                let a = atan2(v[1] - cy, v[0] - cx)
+                let rad = ((v[0] - cx) * (v[0] - cx) + (v[1] - cy) * (v[1] - cy)).squareRoot()
+                arc(rad, a - 1.1, a, tint([v[4], v[5], v[6]], 0.32 * parsing), 3.5)
             }
         }
-        if downloading > 0.02 {
-            // 下载：箭头一次次从上面穿过去
-            let q = (t * 1.1).truncatingRemainder(dividingBy: 1)
-            c.stroke(arrow(-22 + 44 * q), with: ink(downloading * sin(q * Double.pi)), style: pen)
-        }
-        if finished > 0.02 {
-            // 完成：对勾一笔画出来
+        // 等待：脚下一条细线
+        let waiting = amt[Kind.waiting.rawValue]
+        if waiting > 0.02 {
             var p = Path()
-            p.move(to: CGPoint(x: -9, y: 0))
-            p.addLine(to: CGPoint(x: -3, y: 7))
-            p.addLine(to: CGPoint(x: 9, y: -7))
-            c.stroke(p.trimmedPath(from: 0, to: min(1, finished)), with: ink(1), style: pen)
+            p.move(to: CGPoint(x: cx - 48, y: cy + 11))
+            p.addLine(to: CGPoint(x: cx + 48, y: cy + 11))
+            g.stroke(p, with: .color(tint(pal.violet, 0.2 * waiting)), style: StrokeStyle(lineWidth: 2, lineCap: .round))
         }
-        if failed > 0.02 {
-            let z = 7 * failed
+        // 下载、保存：进度圆环（下载是紫的，保存是粉的）。不知道进度时是一段弧一直转
+        let down = amt[Kind.downloading.rawValue], save = amt[Kind.saving.rawValue]
+        let busy = min(1, down + save)
+        if busy > 0.02 {
+            let m = save / max(0.001, down + save)
+            let rc = [0, 1, 2].map { pal.violet[$0] + (pal.rose[$0] - pal.violet[$0]) * m }
+            circle(ring, tint(rc, 0.16 * busy), 6)
+            if !known {
+                let a = headAngle(known: false)
+                arc(ring, a - 1.4, a, tint(rc, busy), 6)
+            } else if prog > 0.003 {
+                arc(ring, -Double.pi / 2, -Double.pi / 2 + 2 * Double.pi * prog, tint(rc, busy), 6)
+            }
+        }
+        // 换状态时荡开的一圈
+        if ripple < 0.7 {
+            let v = discs[0].v
+            circle(30 + ripple * 120, tint([v[4], v[5], v[6]], (1 - ripple / 0.7) * 0.35), 2)
+        }
+
+        // 圆片：始终是正圆
+        for s in discs where s.v[3] > 0.02 {
+            let v = s.v
+            dot(v[0], v[1], v[2], tint([v[4], v[5], v[6]], v[3]))
+        }
+
+        // 完成的勾、失败的叉：画在第一个圆上，跟着它一起弹
+        let finished = amt[Kind.finished.rawValue], failed = amt[Kind.failed.rawValue]
+        guard finished > 0.03 || failed > 0.03 else { return }
+        let a = discs[0].v
+        var c = g
+        c.translateBy(x: a[0], y: a[1])
+        c.scaleBy(x: a[2] / 29, y: a[2] / 29)
+        let pen = StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
+        if finished > 0.03 {
+            var p = Path()
+            p.move(to: CGPoint(x: -12, y: 1))
+            p.addLine(to: CGPoint(x: -4, y: 9))
+            p.addLine(to: CGPoint(x: 12, y: -8))
+            c.stroke(p.trimmedPath(from: 0, to: min(1, finished * 1.2)), with: .color(.white), style: pen)
+        }
+        if failed > 0.03 {
+            let z = 9 * failed
             var p = Path()
             p.move(to: CGPoint(x: -z, y: -z))
             p.addLine(to: CGPoint(x: z, y: z))
             p.move(to: CGPoint(x: z, y: -z))
             p.addLine(to: CGPoint(x: -z, y: z))
-            c.stroke(p, with: ink(failed), style: pen)
+            c.stroke(p, with: .color(Color.white.opacity(min(1, failed))), style: pen)
         }
     }
 }
