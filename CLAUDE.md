@@ -59,6 +59,7 @@ iOS App「多功能媒体下载器」。目标：从常用网站取**尽可能�
 | `album-merge-name`、`album-merge-confirm` | 「给相册改名」页里可以改的相册名，和「改名并放入」按钮 |
 | `view-album` | 保存完成后进度卡片里的「查看相册」（这次放进了相册才出现），在 App 里打开那个相册 |
 | `albums-search`、`albums-filter`、`albums-select`、`albums-merge` | 「相册」页底部：搜索框、筛选（全部 / 手写的名字 / 可能重复）、「多选」、多选后的「合并选中的 N 个相册」 |
+| `albums-merge-group` | 筛选是「可能重复」时每一组下面的「合并这 N 个相册…」：直接问合并到哪一个，不用先多选 |
 | `album-detail-rename`、`album-detail-merge`、`album-detail-select`、`album-detail-delete` | 相册内容页底部：改名、合并到…、选择照片、删除相册 |
 | `album-remove`、`album-move` | 相册内容页选了照片之后：移出相册、移到… |
 | `clear` | 清空输入框。它和系统的「粘贴」按钮（没有标识，按文字「粘贴」找）共用输入框下面、「自动粘贴」开关左边的一个位置：输入框空着时那里是「粘贴」，有内容时是 `clear`；刚换过来的 0.6 秒内不接受点按 |

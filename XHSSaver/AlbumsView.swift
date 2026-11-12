@@ -27,6 +27,10 @@ struct AlbumsView: View {
     @State private var loadRound = 0
     /// 「可能重复」的分组（在后台算）；nil = 还没算出来
     @State private var allGroups: [(key: String, albums: [Albums.Info])]?
+    /// 分组是按旧的相册列表算的：先照旧显示（去掉已经不在的相册），下次看「可能重复」时在后台重算
+    @State private var groupsStale = false
+    /// 要合并的那几个相册（多选选中的，或者「可能重复」里的一组）
+    @State private var mergeList: [Albums.Info] = []
 
     /// 重新读相册列表。在后台读，读完和现在显示的一样就什么都不动（列表不闪、不重排）
     private func reload() async {
@@ -44,16 +48,52 @@ struct AlbumsView: View {
             infos = fresh
             let ids = Set(fresh.map(\.id))
             selected = selected.filter { ids.contains($0) }
-            allGroups = nil
+            keepGroups(ids)
         }
         if filter == .duplicates { await findGroups() }
     }
 
+    /// 分组里只留还在的相册，不足两个的组去掉；标记成「要重算」
+    private func keepGroups(_ ids: Set<String>) {
+        guard let old = allGroups else { return }
+        var kept: [(key: String, albums: [Albums.Info])] = []
+        for g in old {
+            let albums = g.albums.filter { ids.contains($0.id) }
+            if albums.count >= 2 { kept.append((key: g.key, albums: albums)) }
+        }
+        allGroups = kept
+        groupsStale = true
+    }
+
     private func findGroups() async {
-        guard allGroups == nil else { return }
+        guard allGroups == nil || groupsStale else { return }
         let mine = loadRound
         let found = await Albums.duplicateGroups(infos)
-        if mine == loadRound { allGroups = found }
+        if mine == loadRound {
+            allGroups = found
+            groupsStale = false
+        }
+    }
+
+    /// 合并成功之后直接改手上的列表，不重新把所有相册读一遍：
+    /// 去掉被并掉的相册，更新目标相册的数量，分组里也去掉它们（这一步很轻，列表不会跳）
+    private func applyMerge(removed: Set<String>, target: String) {
+        loadRound += 1  // 正在路上的重新读取作废，免得把旧结果盖回来
+        infos.removeAll { removed.contains($0.id) }
+        Albums.forgetCover(of: target)
+        if let i = infos.firstIndex(where: { $0.id == target }) { infos[i].count = Albums.count(of: target) }
+        if let old = allGroups {
+            var kept: [(key: String, albums: [Albums.Info])] = []
+            for g in old {
+                // 留下的相册换成手上最新的那份（目标相册的数量刚更新过）
+                var albums: [Albums.Info] = []
+                for a in g.albums where !removed.contains(a.id) {
+                    albums.append(infos.first { $0.id == a.id } ?? a)
+                }
+                if albums.count >= 2 { kept.append((key: g.key, albums: albums)) }
+            }
+            allGroups = kept
+        }
     }
 
     private var shown: [Albums.Info] {
@@ -104,7 +144,10 @@ struct AlbumsView: View {
     private var bottomBar: some View {
         VStack(spacing: 10) {
             if selecting {
-                Button("合并选中的 \(selected.count) 个相册") { askMerge = true }
+                Button("合并选中的 \(selected.count) 个相册") {
+                    mergeList = picked
+                    askMerge = true
+                }
                     .buttonStyle(PrimaryButtonStyle())
                     .disabled(selected.count < 2 || working)
                     .accessibilityIdentifier("albums-merge")
@@ -164,6 +207,15 @@ struct AlbumsView: View {
                             ForEach(found, id: \.key) { g in
                                 Section("名字里都有「\(g.key)」") {
                                     ForEach(g.albums) { row($0) }
+                                    // 这一组直接合并，不用先多选再去找另一个
+                                    if !selecting {
+                                        Button("合并这 \(g.albums.count) 个相册…") {
+                                            mergeList = g.albums
+                                            askMerge = true
+                                        }
+                                        .disabled(working)
+                                        .accessibilityIdentifier("albums-merge-group")
+                                    }
                                 }
                             }
                         } else {
@@ -192,20 +244,22 @@ struct AlbumsView: View {
                 if value == .duplicates { Task { await findGroups() } }
             }
             .confirmationDialog("合并到哪一个？", isPresented: $askMerge, titleVisibility: .visible) {
-                ForEach(picked) { info in
+                ForEach(mergeList) { info in
                     Button("合并到「\(String(info.title.prefix(20)))」") {
                         working = true
-                        let sources = picked.map(\.album)
+                        let list = mergeList
                         Task {
                             do {
-                                try await Albums.merge(sources, into: info.album)
+                                try await Albums.merge(list.map(\.album), into: info.album)
                                 selecting = false
                                 selected = []
+                                applyMerge(removed: Set(list.map(\.id)).subtracting([info.id]), target: info.id)
                             } catch {
+                                // 可能只做了一半：这时才重新读一遍，以系统里的为准
                                 failure = error.localizedDescription
+                                await reload()
                             }
                             working = false
-                            await reload()
                         }
                     }
                 }
@@ -380,7 +434,7 @@ struct AlbumDetailView: View {
         .sheet(isPresented: $renaming) { renameSheet }
         .sheet(item: $pickingFor) { purpose in
             AlbumPicker(title: purpose == .merge ? "合并到哪个相册" : "移到哪个相册",
-                        excluding: album.localIdentifier) { target in
+                        excluding: album.localIdentifier, related: title) { target in
                 pickingFor = nil
                 if purpose == .merge {
                     // 等选相册的那一页收起来再问，不然确认框弹不出来
@@ -494,11 +548,23 @@ struct AlbumPicker: View {
     let title: String
     /// 不列出这个相册（就是当前所在的那个）
     let excluding: String
+    /// 当前相册的名字：名字对得上的相册（多半是同一个作者）排在最前面
+    var related: String?
     let onPick: (Albums.Info) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var infos: [Albums.Info] = []
+    @State private var likely: [Albums.Info] = []
     @State private var query = ""
+
+    private func pickRow(_ info: Albums.Info) -> some View {
+        Button {
+            onPick(info)
+        } label: {
+            AlbumRow(title: info.title, count: info.count, cover: nil, album: info.album) { EmptyView() }
+        }
+        .foregroundStyle(.primary)
+    }
 
     private var shown: [Albums.Info] {
         let list = infos.filter { $0.id != excluding }
@@ -510,16 +576,19 @@ struct AlbumPicker: View {
     var body: some View {
         NavigationStack {
             List {
-                if shown.isEmpty {
-                    Text("没有找到").foregroundStyle(.secondary)
-                }
-                ForEach(shown) { info in
-                    Button {
-                        onPick(info)
-                    } label: {
-                        AlbumRow(title: info.title, count: info.count, cover: nil, album: info.album) { EmptyView() }
+                let list = shown
+                if Albums.queryParts(query).isEmpty && !likely.isEmpty {
+                    Section("可能是同一个作者") {
+                        ForEach(likely) { pickRow($0) }
                     }
-                    .foregroundStyle(.primary)
+                }
+                Section {
+                    if list.isEmpty {
+                        Text("没有找到").foregroundStyle(.secondary)
+                    }
+                    ForEach(list) { pickRow($0) }
+                } header: {
+                    if !likely.isEmpty { Text("全部相册") }
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -536,7 +605,13 @@ struct AlbumPicker: View {
                     Button("取消") { dismiss() }
                 }
             }
-            .task { infos = await Albums.infos() }
+            .task {
+                let all = await Albums.infos()
+                infos = all
+                if let related {
+                    likely = await Albums.related(to: related, in: all).filter { $0.id != excluding }
+                }
+            }
         }
     }
 }

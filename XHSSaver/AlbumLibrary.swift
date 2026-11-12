@@ -53,6 +53,40 @@ extension Albums {
         return found
     }
 
+    /// 相册内容变了（合并进了别的相册）：封面下次重新取
+    static func forgetCover(of id: String) {
+        covers.removeObject(forKey: id as NSString)
+    }
+
+    /// 重新问系统这个相册现在有多少项（只查这一个）
+    static func count(of id: String) -> Int? {
+        guard let c = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [id], options: nil).firstObject,
+              c.estimatedAssetCount != NSNotFound else { return nil }
+        return c.estimatedAssetCount
+    }
+
+    /// 和这个相册名可能是同一个作者的相册：一边的名字按规则读出 ID、用户名，另一边的名字里也出现了。
+    /// 「合并到…」「移到…」的列表把它们排在最前面，不用再搜
+    static func related(to title: String, in infos: [Info]) async -> [Info] {
+        await Task.detached(priority: .userInitiated) {
+            let reader = NameReader()
+            func keys(_ t: String) -> [String] {
+                var out: [String] = []
+                for e in reader.parse(t)?.entries ?? [] {
+                    let id = e.cleanID, name = e.name.trimmingCharacters(in: .whitespaces)
+                    if id.count >= 4 { out.append(id) }
+                    if name.count >= 2 { out.append(name) }
+                }
+                return out
+            }
+            let mine = keys(title)
+            return infos.filter { info in
+                if mine.contains(where: { info.title.contains($0) }) { return true }
+                return info.ruled && keys(info.title).contains { title.contains($0) }
+            }
+        }.value
+    }
+
     private static func fold(_ s: String) -> String {
         s.folding(options: [.caseInsensitive, .widthInsensitive, .diacriticInsensitive], locale: nil)
     }
