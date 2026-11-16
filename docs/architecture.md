@@ -34,7 +34,7 @@
 |---|---|
 | `Extractors.swift` | 解析器列表和选择顺序；每个网站怎么组合 yt-dlp 和内置浏览器 |
 | `NoteParser.swift` | 小红书：短链、笔记网页、`__INITIAL_STATE__` |
-| `Douyin.swift` | 抖音：解析 + 它自己的内置浏览器读取（最早写的一套） |
+| `Douyin.swift` | 抖音：解析 + 它自己的内置浏览器读取（最早写的一套）。作品数据里的作者通常只有数字 uid、没有抖音号，读完作品后用同一个账号打开一次作者主页读「抖音号」补上（`DouyinCapture.fillNumber`），按 sec_uid 记在本机；读不到才退回 uid |
 | `WebCapture.swift` | 通用的内置浏览器读取，Instagram、X、微博共用 |
 | `Instagram.swift`、`XPost.swift`、`Weibo.swift` | 各自的「怎么认出要的那份数据」和「怎么解析」 |
 | `YtDlp.swift`、`app/dlcore.py`、`PythonBridge.m` | 内嵌 Python 上的 yt-dlp |
