@@ -102,6 +102,9 @@ struct ParsedNote {
     /// 参数：用户在预览页选中的项（items 的下标；nil = 没有经过预览，按全部处理），
     /// 和选的视频清晰度（画面高度，0 = 最高）
     var fetch: (@MainActor (Set<Int>?, Int) async throws -> [NoteMedia])?
+    /// 作者信息还要再补一步（抖音：抖音号要从作者主页读）。解析时已经开始在后台读，
+    /// 放相册之前等它的结果；返回 nil = 没读到，作者信息不变
+    var refineAuthor: (@MainActor () async -> Author?)?
     /// 视频可选的清晰度（画面高度，从高到低）。只有 yt-dlp 的作品有；少于两档就不用选
     var heights: [Int] = []
     /// yt-dlp 的作品：每种清晰度下每一项的下载直链（0 = 最高清晰度）

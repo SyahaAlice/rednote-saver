@@ -58,10 +58,24 @@ struct DouyinExtractor: SiteExtractor {
         service.say("用账号「\(account.name)」在内置浏览器里读取作品…", detail: true)
         let detail = try await service.runCapture(DouyinCapture(account: account, target: ref))
         await WebAccounts.shared.exportCookies(account)  // 顺便刷新号池里的抖音 cookie
-        if let author = detail["author"] as? [String: Any], !Douyin.hasNumber(author) {
-            service.say("没读到作者的抖音号，相册名先用数字 ID（uid）")
+        var note = try Douyin.parse(detail: detail)
+        // 作品数据里没有抖音号：读过这个作者就直接用；没读过就马上在后台开作者主页读，
+        // 不等它，先往下走（预览、选清晰度），到放相册那一步才用
+        if let raw = detail["author"] as? [String: Any], !Douyin.hasNumber(raw),
+           let sec = Douyin.secUid(raw), let author = note.author {
+            if let known = Douyin.knownNumber(sec) {
+                note.author = Douyin.withNumber(author, known)
+            } else {
+                let lookup = Task { @MainActor in await service.readDouyinNumber(account: account, secUid: sec) }
+                note.refineAuthor = {
+                    let number = await lookup.value
+                    guard !number.isEmpty else { return nil }
+                    Douyin.remember(number, for: sec)
+                    return Douyin.withNumber(author, number)
+                }
+            }
         }
-        return try Douyin.parse(detail: detail)
+        return note
     }
 }
 

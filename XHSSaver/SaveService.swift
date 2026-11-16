@@ -274,6 +274,17 @@ final class SaveService: ObservableObject {
         if headless { throw XHSError("这个网站要打开 App 用内置浏览器读取，后台做不了。请改用「下载到相册」操作") }
     }
 
+    /// 正在后台读抖音号的网页（挂在主界面底下，看不见）
+    @Published private(set) var numberReader: DouyinNumberReader?
+
+    /// 在后台打开抖音作者主页读抖音号（页面不显示）。读不到返回空字符串
+    func readDouyinNumber(account: WebAccount, secUid: String) async -> String {
+        let reader = DouyinNumberReader(account: account)
+        numberReader = reader
+        defer { if numberReader === reader { numberReader = nil } }
+        return await reader.read(secUid: secUid)
+    }
+
     /// 用抖音内置浏览器在后台读取作品数据（页面不显示）
     func runCapture(_ cap: DouyinCapture) async throws -> [String: Any] {
         try checkCancelled()
@@ -378,6 +389,7 @@ final class SaveService: ObservableObject {
         if previewRequest != nil { decidePreview(nil) }
         capture?.cancel()
         webCapture?.cancel()
+        numberReader?.stop()
     }
 
     /// 用户点了取消就在这里停下（各个步骤之间调用）
@@ -485,6 +497,18 @@ final class SaveService: ObservableObject {
                 try checkCancelled()
                 return "已跳过（之前保存过）"
             }
+        }
+
+        // 抖音号是解析时就在后台开始读的，到这里多半已经读完；没读完就等它一下
+        if let refine = note.refineAuthor {
+            note.refineAuthor = nil
+            if let a = await refine() {
+                note.author = a
+                say("作者的抖音号：\(a.primaryID)", detail: true)
+            } else {
+                say("没读到作者的抖音号，相册名先用数字 ID（uid）")
+            }
+            try checkCancelled()
         }
 
         target = SaveTarget()

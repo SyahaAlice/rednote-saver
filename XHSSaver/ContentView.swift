@@ -57,6 +57,8 @@ struct ContentView: View {
                 if let cap = service.capture { hiddenWeb(cap.webView) }
                 if let cap = service.webCapture { hiddenWeb(cap.webView) }
             }
+            // 后台读抖音号的网页：读作品的页面收起来以后它可能还在读，所以单独挂着
+            if let reader = service.numberReader { hiddenWeb(reader.webView) }
         }
         .sheet(item: $service.previewRequest) { req in
             PreviewView(request: req)

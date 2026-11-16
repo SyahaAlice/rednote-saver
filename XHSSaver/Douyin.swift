@@ -22,6 +22,22 @@ enum Douyin {
         UserDefaults.standard.set(all, forKey: numbersKey)
     }
 
+    /// 作者的 sec_uid（打开作者主页用）。只留网址里安全的字符
+    static func secUid(_ author: [String: Any]) -> String? {
+        let s = (author["sec_uid"] as? String ?? "").filter {
+            $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-")
+        }
+        return s.isEmpty ? nil : s
+    }
+
+    /// 读到抖音号之后的作者信息：相册名改用抖音号，原来的 uid、sec_uid 仍然留着用来匹配
+    static func withNumber(_ author: Author, _ number: String) -> Author {
+        var a = author
+        a.primaryID = number
+        a.ids = [number] + author.ids.filter { $0 != number }
+        return a
+    }
+
     /// 作者信息里有没有抖音号（unique_id；没设抖音号的人是数字的 short_id，"0" 等于没有）
     static func hasNumber(_ author: [String: Any]) -> Bool {
         func s(_ k: String) -> String {
@@ -177,7 +193,7 @@ enum Douyin {
                 return ""
             }
             // 相册名用抖音号（unique_id，没设置时是 short_id）；匹配时 uid、sec_uid 也算。
-            // 作品数据里常常没有抖音号，读取时会去作者主页补上（DouyinCapture.fillNumber）；补不上才退回 uid
+            // 作品数据里通常没有抖音号，先用 uid 占位，DouyinExtractor 会去作者主页读（DouyinNumberReader）
             let short = str("short_id") == "0" ? "" : str("short_id")
             let douyinNo = str("unique_id").isEmpty ? short : str("unique_id")
             let uid = str("uid")
@@ -267,31 +283,6 @@ final class DouyinCapture: ObservableObject, Identifiable {
     private var modalURL: URL { URL(string: "https://www.douyin.com/jingxuan?modal_id=\(target.id)")! }
     /// 已经看过几次网页里的数据（「重新加载」时清零）
     private var polls = 0
-    /// 用户点了取消（补抖音号那一步也要停）
-    private var cancelled = false
-
-    /// 在作者主页上读抖音号：先读页面上显示的「抖音号：xxx」，没有再到页面脚本里找和这个 sec_uid 写在一起的 uniqueId。
-    /// 只读页面内容，不发请求
-    private static func numberJS(_ sec: String) -> String {
-        #"""
-        (function (sec) {
-          if (location.pathname.indexOf(sec) < 0) return '';
-          var m = ((document.body && document.body.innerText) || '').match(/抖音号[:：]\s*([^\s]+)/);
-          if (m) return m[1];
-          var ss = document.scripts;
-          for (var i = 0; i < ss.length; i++) {
-            var t = ss[i].textContent || '';
-            if (t.indexOf(sec) < 0) continue;
-            var flat = t.replace(/\\+"/g, '"'), at = flat.indexOf(sec);
-            var re = /"uniqueId":"([^"]+)"/g, best = '', dist = 6000, r;
-            while ((r = re.exec(flat))) { var d = Math.abs(r.index - at); if (d < dist) { dist = d; best = r[1]; } }
-            if (best) return best;
-          }
-          return '';
-        })("\#(sec)")
-        """#
-    }
-
     /// 在网页自带的数据里找这个作品（登录后抖音把作品数据直接写在页面的 <script> 里，不再请求接口）。
     /// 找到就返回它的 JSON 文字，没找到返回空字符串。只读页面内容，不发请求
     private var scanJS: String {
@@ -371,34 +362,7 @@ final class DouyinCapture: ObservableObject, Identifiable {
             guard let self, self.continuation != nil else { return }
             self.hint = "还没拿到作品数据：可能需要登录或验证。请在下方页面里完成，再点「重新加载」。"
         }
-        let detail = try await withCheckedThrowingContinuation { continuation = $0 }
-        let filled = await fillNumber(detail)
-        if cancelled { throw XHSError.cancelled }
-        return filled
-    }
-
-    /// 作品数据里的作者常常只有内部 uid、没有抖音号。这时用同一个账号打开一次作者主页，把抖音号读出来补进去。
-    /// 读到的记在本机（同一个作者下次不用再读）；读不到就原样返回，相册名会退回 uid
-    private func fillNumber(_ detail: [String: Any]) async -> [String: Any] {
-        guard var author = detail["author"] as? [String: Any], !Douyin.hasNumber(author) else { return detail }
-        let sec = (author["sec_uid"] as? String ?? "").filter { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }
-        guard !sec.isEmpty else { return detail }
-        var number = Douyin.knownNumber(sec) ?? ""
-        if number.isEmpty, let url = URL(string: "https://www.douyin.com/user/\(sec)") {
-            hint = "正在读作者的抖音号…"
-            webView.load(URLRequest(url: url))
-            for _ in 0..<16 where number.isEmpty && !cancelled {  // 最多等 12 秒左右
-                try? await Task.sleep(nanoseconds: 750_000_000)
-                number = await evaluate(Self.numberJS(sec)).trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            webView.stopLoading()
-            if !number.isEmpty { Douyin.remember(number, for: sec) }
-        }
-        guard !number.isEmpty else { return detail }
-        author["unique_id"] = number
-        var out = detail
-        out["author"] = author
-        return out
+        return try await withCheckedThrowingContinuation { continuation = $0 }
     }
 
     private func received(_ text: String) {
@@ -416,7 +380,6 @@ final class DouyinCapture: ObservableObject, Identifiable {
     }
 
     func cancel() {
-        cancelled = true
         finish(.failure(XHSError.cancelled))
     }
 
@@ -426,6 +389,77 @@ final class DouyinCapture: ObservableObject, Identifiable {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "xhsCapture", contentWorld: .page)
         webView.stopLoading()
         c.resume(with: result)
+    }
+}
+
+// MARK: - 作者主页读抖音号
+
+/// 作品数据、作者作品列表里的作者都只有数字 uid，抖音号只在作者主页上有。
+/// 这里用同一个登录账号在后台打开作者主页，把页面上的「抖音号」读出来。只读页面内容，不发请求。
+/// 拿到作品后立刻开始读，不挡后面的预览、选清晰度；到放相册那一步才用它
+@MainActor
+final class DouyinNumberReader {
+    let webView: WKWebView
+    private var stopped = false
+
+    init(account: WebAccount) {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = account.dataStore
+        config.defaultWebpagePreferences.preferredContentMode = .desktop
+        config.mediaTypesRequiringUserActionForPlayback = .all
+        webView = WKWebView(frame: .zero, configuration: config)
+    }
+
+    /// 先读页面上显示的「抖音号：xxx」；页面还没画出来时，到页面脚本里找和这个 sec_uid 写在一起的 uniqueId
+    /// （主页的数据随网页一起下发，网页一到就能读到，不用等图片）
+    private static func js(_ sec: String) -> String {
+        #"""
+        (function (sec) {
+          if (location.pathname.indexOf(sec) < 0) return '';
+          var m = ((document.body && document.body.innerText) || '').match(/抖音号[:：]\s*([^\s]+)/);
+          if (m) return m[1];
+          var ss = document.scripts;
+          for (var i = 0; i < ss.length; i++) {
+            var t = ss[i].textContent || '';
+            if (t.indexOf(sec) < 0) continue;
+            var flat = t.replace(/\\+"/g, '"'), at = flat.indexOf(sec);
+            var re = /"uniqueId":"([^"]+)"/g, best = '', dist = 6000, r;
+            while ((r = re.exec(flat))) { var d = Math.abs(r.index - at); if (d < dist) { dist = d; best = r[1]; } }
+            if (best) return best;
+          }
+          return '';
+        })("\#(sec)")
+        """#
+    }
+
+    /// 读到的抖音号；读不到（最多等 8 秒）或被取消返回空字符串
+    func read(secUid sec: String) async -> String {
+        guard let url = URL(string: "https://www.douyin.com/user/\(sec)") else { return "" }
+        webView.load(URLRequest(url: url))
+        defer { webView.stopLoading() }
+        for _ in 0..<32 where !stopped {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            let v = await evaluate(Self.js(sec)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !v.isEmpty { return v }
+        }
+        return ""
+    }
+
+    func stop() {
+        stopped = true
+        webView.stopLoading()
+    }
+
+    private func evaluate(_ js: String) async -> String {
+        await withCheckedContinuation { (c: CheckedContinuation<String, Never>) in
+            webView.evaluateJavaScript(js, in: nil, in: .page) { result in
+                if case .success(let v) = result, let s = v as? String {
+                    c.resume(returning: s)
+                } else {
+                    c.resume(returning: "")
+                }
+            }
+        }
     }
 }
 
