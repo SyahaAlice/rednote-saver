@@ -103,8 +103,12 @@ def parse_html(html, note_id):
     if not note:
         raise RuntimeError("页面里没有这篇笔记的数据")
     items = []
-    if note.get("type") == "video":
-        v = note.get("video") or {}
+    # 类型是「视频」但原片地址以 slides_simulate 开头的，是照片自动合成的幻灯片：按照片存
+    v = note.get("video") or {}
+    origin_key = (v.get("consumer") or {}).get("originVideoKey") or ""
+    photos = [im for im in note.get("imageList") or [] if im.get("fileId")]
+    slideshow = origin_key.startswith("slides_simulate") and bool(photos)
+    if note.get("type") == "video" and not slideshow:
         key = (v.get("consumer") or {}).get("originVideoKey")
         streams = [s for lst in ((v.get("media") or {}).get("stream") or {}).values() for s in lst]
         h264 = [s for s in streams if s.get("masterUrl") and (s.get("videoCodec") or "").startswith("h264")]

@@ -169,8 +169,15 @@ enum NoteParser {
         var items: [NoteMedia] = []
         var qualities: [VideoQuality] = []
 
-        if type == "video" {
-            let video = note["video"] as? [String: Any] ?? [:]
+        // 有一种笔记登记的类型是「视频」，其实是照片：小红书把几张照片自动合成了一段幻灯片视频
+        // （原片地址以 slides_simulate 开头），照片本身还在 imageList 里。这种按照片存，不存那段合成的视频
+        let videoInfo = note["video"] as? [String: Any] ?? [:]
+        let originKey = (videoInfo["consumer"] as? [String: Any])?["originVideoKey"] as? String ?? ""
+        let photos = (note["imageList"] as? [[String: Any]] ?? []).filter { !($0["fileId"] as? String ?? "").isEmpty }
+        let slideshow = originKey.hasPrefix("slides_simulate") && !photos.isEmpty
+
+        if type == "video" && !slideshow {
+            let video = videoInfo
             var original: [URL] = []
             if let key = (video["consumer"] as? [String: Any])?["originVideoKey"] as? String, !key.isEmpty,
                let u = URL(string: origVideoBase + key) {

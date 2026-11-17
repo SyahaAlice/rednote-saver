@@ -33,7 +33,7 @@
 | 文件 | 作用 |
 |---|---|
 | `Extractors.swift` | 解析器列表和选择顺序；每个网站怎么组合 yt-dlp 和内置浏览器 |
-| `NoteParser.swift` | 小红书：短链、笔记网页、`__INITIAL_STATE__` |
+| `NoteParser.swift` | 小红书：短链、笔记网页、`__INITIAL_STATE__`。类型是「视频」但原片地址以 `slides_simulate` 开头的，是照片自动合成的幻灯片：按 `imageList` 里的照片存，不存合成的视频 |
 | `Douyin.swift` | 抖音：解析 + 它自己的内置浏览器读取（最早写的一套）。作品数据里的作者只有数字 uid、没有抖音号：拿到作品后立刻在后台用同一个账号打开作者主页读「抖音号」（`DouyinNumberReader`），不挡预览，放相册之前才用（`ParsedNote.refineAuthor`）；读到的按 sec_uid 记在本机，读不到才退回 uid |
 | `WebCapture.swift` | 通用的内置浏览器读取，Instagram、X、微博共用 |
 | `Instagram.swift`、`XPost.swift`、`Weibo.swift` | 各自的「怎么认出要的那份数据」和「怎么解析」 |
