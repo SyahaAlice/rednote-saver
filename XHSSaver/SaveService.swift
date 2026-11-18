@@ -160,6 +160,9 @@ final class SaveService: ObservableObject {
     private var previewContinuation: CheckedContinuation<PreviewChoice?, Never>?
     /// 这次要下载的直链（解析完就有；预览页里改了勾选或清晰度后会更新）
     @Published private(set) var links: [String] = []
+    /// 上一次保存用的文字和方式：失败或取消后贴回输入框、「重试」用
+    @Published private(set) var lastInput = ""
+    private(set) var lastMode = SaveMode.organize
     private var useFallbackForAll = false
     /// 内置浏览器读取页现在是不是摆在用户面前（平时在后台读，不显示）
     @Published private(set) var captureShown = false
@@ -350,6 +353,8 @@ final class SaveService: ObservableObject {
         savedAlbum = nil
         latest = ""
         useFallbackForAll = false
+        lastInput = text
+        lastMode = mode
         // 保存期间不自动锁屏；切到别的 App 时先向系统多要一点时间（真正的后台继续在开始下载时申请）
         BackgroundRun.shared.begin()
         let task = Task { @MainActor in try await self.run(text: text, mode: mode) }

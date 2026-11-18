@@ -91,8 +91,6 @@ struct DownloadView: View {
     /// 上次看到的剪贴板编号（内容每变一次，系统把编号加一）。nil = 刚打开 App，还没看过
     @State private var seenClip: Int?
     @AppStorage(Prefs.autoPasteKey) private var autoPaste = false
-    /// 粘贴 / 清空刚换过位：这一小段时间里不接受点按，免得连点两下把刚粘贴的又清掉
-    @State private var swapHold = false
 
     /// 「自动粘贴」开着时：打开 App、从别处切回来，剪贴板里有新的文字就直接替换输入框里的内容。
     /// 只在编号变了的时候读：系统每读一次都可能弹「允许粘贴」，同样的内容不读第二遍。
@@ -154,6 +152,10 @@ struct DownloadView: View {
             .toolbar(.hidden, for: .navigationBar)
             .animation(.easeInOut(duration: 0.2), value: service.log.count)
             .onAppear { if seenClip == nil { pasteIfNew() } }
+            // 中途失败或取消：输入框空着（保存时清掉了，或者是从快捷指令进来的）就把这次的链接贴回去，可以再点一次
+            .onChange(of: service.phase) { phase in
+                if (phase == .failed || phase == .cancelled) && empty { text = service.lastInput }
+            }
             .onChange(of: scenePhase) { phase in
                 // 退到后台时记下编号：在 App 里自己复制的东西（比如下载直链）回来时不会被填进去。
                 // 只在 .background 记，不能在 .inactive 记：切回来时会先经过 .inactive，
@@ -195,7 +197,7 @@ struct DownloadView: View {
     }
 
     // 输入框；下面一行靠右：一个位置轮流放「粘贴」和「清空」，它右边是「自动粘贴」开关。
-    // 空的时候是粘贴，有内容就变成清空，可以在同一个地方连着按。
+    // 空的时候是粘贴，有内容就变成清空，可以在同一个地方连着按（不设连点间隔，用户要求去掉的）。
     // 「粘贴」用系统的粘贴按钮（用户试过自己画的按钮，要求退回来）
     private var inputCard: some View {
         Card {
@@ -233,7 +235,6 @@ struct DownloadView: View {
                     }
                 }
                 .frame(minWidth: 92, minHeight: 36, alignment: .trailing)
-                .allowsHitTesting(!swapHold)
                 Toggle("自动粘贴", isOn: $autoPaste)
                     .toggleStyle(.switch)
                     .tint(Theme.violet)
@@ -243,15 +244,19 @@ struct DownloadView: View {
                     .accessibilityIdentifier("auto-paste")
             }
         }
-        .onChange(of: text.isEmpty) { _ in
-            swapHold = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { swapHold = false }
-        }
     }
 
     private func start(_ mode: SaveMode) {
         editing = false
         let input = text
+        Task { _ = try? await service.save(text: input, mode: mode) }
+    }
+
+    /// 用上一次的链接、上一次的方式再来一遍（输入框里已经换成别的内容也不受影响）
+    private func retry() {
+        editing = false
+        let input = service.lastInput
+        let mode: SaveMode = service.lastMode == .quick ? .quick : .organize
         Task { _ = try? await service.save(text: input, mode: mode) }
     }
 
@@ -356,6 +361,16 @@ struct DownloadView: View {
             }
             if let last = service.log.last {
                 LogRow(line: brief(last), latest: true)
+            }
+            if service.phase == .failed || service.phase == .cancelled,
+               !service.isRunning, !service.lastInput.isEmpty {
+                Button {
+                    retry()
+                } label: {
+                    Label("重试", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(ChipButtonStyle())
+                .accessibilityIdentifier("retry")
             }
             if service.phase == .finished, service.savedAlbum != nil {
                 Button {
