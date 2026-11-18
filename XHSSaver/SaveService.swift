@@ -550,7 +550,7 @@ final class SaveService: ObservableObject {
 
     // MARK: - 相册归类
 
-    /// 快速保存：恰好有一个完全匹配的相册（名字里有按规则写的这个账号）就直接放进去，
+    /// 快速保存：恰好有一个完全匹配的相册（名字里有完整的这个账号 ID，带不带前缀都算）就直接放进去，
     /// 没有或者不止一个就不放相册。不问、不新建、不改名、不弹权限申请
     private func quickAlbum(for note: ParsedNote) -> PHAssetCollection? {
         guard let author = note.author, !(author.primaryID.isEmpty && author.ids.isEmpty) else { return nil }

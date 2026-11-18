@@ -772,7 +772,7 @@ struct AlbumChoiceView: View {
                 .padding(12)
                 .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .accessibilityIdentifier("album-merge-name")
-            Text("可以随便改。名字里留着这次账号的「前缀 + ID」，以后这个账号就能自动对上这个相册。")
+            Text("可以随便改。名字里留着这次账号的 ID，以后这个账号就能自动对上这个相册。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)

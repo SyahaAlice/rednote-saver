@@ -209,6 +209,25 @@ enum Albums {
         return false
     }
 
+    /// 相册名里有没有**完整的**这个 ID（不管前面有没有前缀、前缀是什么）：
+    /// ID 前面不能紧挨着英文字母或数字，后面不能紧挨着英文字母、数字或下划线
+    /// （lhw1999 不算匹配 lhw1999513，12345 不算匹配 9912345）。前面是下划线、中文、空格、括号都可以，
+    /// 所以「名字 lhw1999513」「名字（dy_lhw1999513）」「名字lhw1999513」都算。
+    /// 太短的 ID 不算；纯数字的要 6 位以上，免得撞上相册名里的年份、日期
+    static func hasWholeID(_ title: String, _ id: String) -> Bool {
+        guard id.count >= (id.allSatisfy(\.isNumber) ? 6 : 4) else { return false }
+        func alnum(_ c: Character) -> Bool { c.isASCII && (c.isLetter || c.isNumber) }
+        var from = title.startIndex
+        while let r = title.range(of: id, range: from..<title.endIndex) {
+            let before = r.lowerBound == title.startIndex || !alnum(title[title.index(before: r.lowerBound)])
+            let after = r.upperBound == title.endIndex
+                || !(alnum(title[r.upperBound]) || title[r.upperBound] == "_")
+            if before && after { return true }
+            from = title.index(after: r.lowerBound)
+        }
+        return false
+    }
+
     /// 已有相册 + 这次的账号合并后的新名字；没有新增信息时返回 nil。
     /// 旧名字是按规则写的：把账号并进去重新生成。是手写的名字：原名保留，后面按规则接上这次的账号
     static func mergedName(existing title: String, adding entries: [Entry]) -> String? {
@@ -232,9 +251,10 @@ enum Albums {
     /// 一个已有相册和这次的作者对得上到什么程度
     struct Match {
         enum Level: Int {
-            /// 相册名里有按规则写的这个账号（前缀 + ID）：确定就是它，快速保存会直接放入
+            /// 相册名里有完整的这个 ID（按规则写的「前缀 + ID」，或者单独的 ID，见 hasWholeID）：
+            /// 确定就是它，快速保存会直接放入
             case exact
-            /// 相册名里出现了这个 ID，但不是按规则写的：多半是，让用户自己定
+            /// 这个 ID 只是相册名里一串更长的字母数字的一部分：不一定是，让用户自己定
             case id
             /// 只对上了用户名：昵称可能重名
             case name
@@ -277,7 +297,7 @@ enum Albums {
         var found: [Match] = []
         all.enumerateObjects { c, _, _ in
             let t = c.localizedTitle ?? ""
-            if entries.contains(where: { mentions(t, $0) }) {
+            if entries.contains(where: { mentions(t, $0) }) || ids.contains(where: { hasWholeID(t, $0) }) {
                 found.append(Match(album: c, title: t, level: .exact))
             } else if ids.contains(where: { t.contains($0) }) {
                 found.append(Match(album: c, title: t, level: .id))
