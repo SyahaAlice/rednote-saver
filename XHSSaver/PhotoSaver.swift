@@ -308,7 +308,7 @@ enum Albums {
     /// 一个相册名和这次的作者对得上到哪一档；对不上返回 nil。
     /// 按规则写的名字能拆成「用户名」和「ID」两部分，拆开比：ID 只和 ID 比，用户名只和用户名比。
     /// 用户名不参与 ID 匹配（用户定的）：别人的昵称里碰巧有这串 ID，不能算成这个作者。
-    /// 手写的名字拆不开，只能整个名字一起看
+    /// 手写的名字拆不开：ID 只认中文括号里的，括号外面当名字看
     static func level(of title: String, entries: [Entry], ids: Set<String>, names: Set<String>,
                       reader: NameReader) -> Match.Level? {
         if let parsed = reader.parse(title) {
@@ -319,7 +319,11 @@ enum Albums {
             if theirNames.contains(where: { theirs in names.contains { theirs.contains($0) } }) { return .name }
             return nil
         }
-        if entries.contains(where: { mentions(title, $0) }) || ids.contains(where: { hasWholeID(title, $0) }) {
+        // 手写的名字：ID 只认写在中文括号里的（用户的习惯：ID 只出现在括号里、跟在前缀后面），
+        // 括号外面的是名字，不参与 ID 匹配
+        let inside = title.split(separator: "（").dropFirst().map { String($0.prefix { $0 != "）" }) }
+        if entries.contains(where: { mentions(title, $0) })
+            || inside.contains(where: { part in ids.contains { hasWholeID(part, $0) } }) {
             return .exact
         }
         if ids.contains(where: { title.contains($0) }) { return .id }
