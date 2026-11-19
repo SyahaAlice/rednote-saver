@@ -251,10 +251,10 @@ enum Albums {
     /// 一个已有相册和这次的作者对得上到什么程度
     struct Match {
         enum Level: Int {
-            /// 相册名里有完整的这个 ID（按规则写的「前缀 + ID」，或者单独的 ID，见 hasWholeID）：
-            /// 确定就是它，快速保存会直接放入
+            /// ID 对上了：按规则写的相册名里，ID 那一部分就是这个 ID；手写的相册名里有完整的这个 ID
+            /// （见 hasWholeID）。确定就是它，快速保存会直接放入
             case exact
-            /// 这个 ID 只是相册名里一串更长的字母数字的一部分：不一定是，让用户自己定
+            /// 这个 ID 只是相册名里更长一串的一部分：不一定是，让用户自己定
             case id
             /// 只对上了用户名：昵称可能重名
             case name
@@ -294,18 +294,37 @@ enum Albums {
         // 太短的 ID 容易误匹配
         let ids = Set(entries.map(\.cleanID).filter { $0.count >= 4 })
         let names = Set(entries.map { $0.name.trimmingCharacters(in: .whitespaces) }.filter { $0.count >= 2 })
+        let reader = NameReader()
         var found: [Match] = []
         all.enumerateObjects { c, _, _ in
             let t = c.localizedTitle ?? ""
-            if entries.contains(where: { mentions(t, $0) }) || ids.contains(where: { hasWholeID(t, $0) }) {
-                found.append(Match(album: c, title: t, level: .exact))
-            } else if ids.contains(where: { t.contains($0) }) {
-                found.append(Match(album: c, title: t, level: .id))
-            } else if names.contains(where: { t.contains($0) }) {
-                found.append(Match(album: c, title: t, level: .name))
+            if let level = level(of: t, entries: entries, ids: ids, names: names, reader: reader) {
+                found.append(Match(album: c, title: t, level: level))
             }
         }
         return found.sorted { $0.level.rawValue < $1.level.rawValue }
+    }
+
+    /// 一个相册名和这次的作者对得上到哪一档；对不上返回 nil。
+    /// 按规则写的名字能拆成「用户名」和「ID」两部分，拆开比：ID 只和 ID 比，用户名只和用户名比。
+    /// 用户名不参与 ID 匹配（用户定的）：别人的昵称里碰巧有这串 ID，不能算成这个作者。
+    /// 手写的名字拆不开，只能整个名字一起看
+    static func level(of title: String, entries: [Entry], ids: Set<String>, names: Set<String>,
+                      reader: NameReader) -> Match.Level? {
+        if let parsed = reader.parse(title) {
+            let theirIDs = parsed.entries.map(\.cleanID)
+            if theirIDs.contains(where: { ids.contains($0) }) { return .exact }
+            if theirIDs.contains(where: { theirs in ids.contains { theirs.contains($0) } }) { return .id }
+            let theirNames = parsed.entries.map { $0.name.trimmingCharacters(in: .whitespaces) }
+            if theirNames.contains(where: { theirs in names.contains { theirs.contains($0) } }) { return .name }
+            return nil
+        }
+        if entries.contains(where: { mentions(title, $0) }) || ids.contains(where: { hasWholeID(title, $0) }) {
+            return .exact
+        }
+        if ids.contains(where: { title.contains($0) }) { return .id }
+        if names.contains(where: { title.contains($0) }) { return .name }
+        return nil
     }
 
     /// 用户自己输入文字搜相册名（比较规则见 title(_:matches:)，和「相册」页是同一套）
