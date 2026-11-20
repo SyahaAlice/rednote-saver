@@ -16,6 +16,8 @@ struct PreviewRequest: Identifiable {
     let savedBefore: Date?
     /// 视频可选的清晰度（第一项是首选，代号 0）；少于两档就不显示选择
     let qualities: [VideoQuality]
+    /// 一打开就摆成这样（从选相册页返回时是上一次的选择）；nil = 全选、最高清晰度
+    let initial: PreviewChoice?
     /// 选中的项和清晰度对应的下载直链
     let links: (Set<Int>, Int) -> [String]
 }
@@ -274,7 +276,10 @@ struct PreviewView: View {
                     }
                 }
             }
-            .onAppear { selection = Set(request.items.indices) }
+            .onAppear {
+                selection = request.initial?.selection ?? Set(request.items.indices)
+                height = request.initial?.height ?? 0
+            }
         }
         .interactiveDismissDisabled()
     }

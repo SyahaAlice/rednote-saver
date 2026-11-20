@@ -694,6 +694,13 @@ struct AlbumChoiceView: View {
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("放进哪个相册")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                // 回到预览页重新勾选（要整个取消，在预览页点「取消」）
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("返回") { service.decideAlbum(.back) }
+                        .accessibilityIdentifier("album-back")
+                }
+            }
             .disabled(working)
             .safeAreaInset(edge: .bottom) { bottomBar }
             .onAppear {

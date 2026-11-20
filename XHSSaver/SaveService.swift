@@ -23,6 +23,8 @@ enum AlbumDecision {
     case existing(PHAssetCollection)
     case create(String)
     case none
+    /// 点了「返回」：回到预览页重新勾选
+    case back
 }
 
 /// 保存流程走到哪一步。以前这些状态散在 isRunning、几个弹窗变量和日志文字里，现在集中写在这里，
@@ -239,12 +241,13 @@ final class SaveService: ObservableObject {
     }
 
     /// 弹出预览页，等用户勾选、选清晰度。nil = 用户点了取消
-    private func choosePreview(_ note: ParsedNote) async -> PreviewChoice? {
+    /// initial：从选相册页「返回」时，上一次在预览页的选择，原样摆出来
+    private func choosePreview(_ note: ParsedNote, initial: PreviewChoice?) async -> PreviewChoice? {
         if Task.isCancelled { return nil }
         let request = PreviewRequest(platform: note.platform, title: note.title, author: note.author,
                                      items: note.items, referer: note.referer,
                                      savedBefore: History.savedDate(note.historyKey),
-                                     qualities: note.qualityOptions,
+                                     qualities: note.qualityOptions, initial: initial,
                                      links: { note.links(selection: $0, height: $1) })
         return await waiting {
             await withCheckedContinuation { (c: CheckedContinuation<PreviewChoice?, Never>) in
@@ -471,12 +474,21 @@ final class SaveService: ObservableObject {
         // 「快速保存」：不预览、不选相册，全部保存，视频取最高清晰度
         var selection: Set<Int>?
         var height = 0
+        /// 解析出来的完整的一份：从选相册页「返回」时，预览页要重新列出全部
+        let parsedItems = note.items
+        /// 上一次在预览页的选择
+        var picked: PreviewChoice?
+        var album: PHAssetCollection?
+        // 预览 → 选相册；在选相册页点「返回」就回到预览重来一遍
+        choosing: while true {
         if mode == .organize {
-            guard let choice = await choosePreview(note) else {
+            note.items = parsedItems
+            guard let choice = await choosePreview(note, initial: picked) else {
                 cancel()  // 在预览页点了取消 = 取消这次保存
                 throw XHSError.cancelled
             }
             try checkCancelled()
+            picked = choice
             let chosen = choice.selection
             selection = chosen
             height = choice.height
@@ -516,16 +528,26 @@ final class SaveService: ObservableObject {
             try checkCancelled()
         }
 
+        if mode == .organize {
+            switch try await chooseAlbum(for: note) {
+            case .back:
+                try checkCancelled()
+                continue choosing
+            case .album(let chosen):
+                album = chosen
+            }
+        } else if mode == .quick {
+            album = quickAlbum(for: note)
+        }
+        break
+        }
+
         target = SaveTarget()
         if Prefs.usePublishDate, let p = note.published {
             target.creationDate = p
             say("照片日期设为发布时间：\(p.formatted(date: .abbreviated, time: .shortened))", detail: true)
         }
-        if mode == .organize {
-            target.album = try await chooseAlbum(for: note)
-        } else if mode == .quick {
-            target.album = quickAlbum(for: note)
-        }
+        target.album = album
         savedAlbum = target.album
         try checkCancelled()
 
@@ -567,14 +589,20 @@ final class SaveService: ObservableObject {
         return exact[0].album
     }
 
-    private func chooseAlbum(for note: ParsedNote) async throws -> PHAssetCollection? {
+    /// 选相册页的结果：放进哪个相册（nil = 不放），或者用户点了「返回」
+    private enum AlbumOutcome {
+        case album(PHAssetCollection?)
+        case back
+    }
+
+    private func chooseAlbum(for note: ParsedNote) async throws -> AlbumOutcome {
         guard let author = note.author, !author.name.isEmpty || !author.ids.isEmpty else {
             say("拿不到作者信息，不做相册归类")
-            return nil
+            return .album(nil)
         }
         guard await PhotoSaver.hasFullAccess() else {
             say("没有「完整照片访问」权限，读不到已有相册，这次不做相册归类（可在系统设置里改）")
-            return nil
+            return .album(nil)
         }
         try checkCancelled()
         let request = AlbumRequest(platform: note.platform, author: author,
@@ -589,13 +617,16 @@ final class SaveService: ObservableObject {
         switch decision {
         case .existing(let album):
             say("放入相册：\(album.localizedTitle ?? "")")
-            return album
+            return .album(album)
         case .create(let name):
             let album = try await Albums.create(name)
             say("新建相册：\(name)")
-            return album
+            return .album(album)
         case .none:
-            return nil
+            return .album(nil)
+        case .back:
+            say("回到预览", detail: true)
+            return .back
         }
     }
 
